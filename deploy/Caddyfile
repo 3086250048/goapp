@@ -1,0 +1,24 @@
+# 出行原型 · 公网部署（Caddy 版，自动 HTTPS）
+# 用法：
+#   1. 把本文件里的 trip.example.com 改成你的域名
+#   2. sudo cp Caddyfile /etc/caddy/Caddyfile
+#   3. sudo systemctl reload caddy
+
+trip.example.com {
+	root * /var/www/trip
+	encode gzip zstd
+
+	# service worker 不能被缓存，否则更新不生效
+	header /sw.js Cache-Control "no-store"
+
+	# 入口文件每次校验，保证拿到最新版本
+	header /index.html Cache-Control "no-cache"
+	header /manifest.webmanifest Cache-Control "no-cache"
+
+	# 原型阶段建议开一层口令，避免公网裸奔（生成方式见 README）
+	# basic_auth {
+	# 	demo $2a$14$REPLACE_WITH_caddy_hash_password_OUTPUT
+	# }
+
+	file_server
+}

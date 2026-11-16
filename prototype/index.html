@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>出行 · 行程规划</title>
+
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#FF6B2C">
+<meta name="description" content="像刷外卖一样规划出行，一键下单">
+
+<!-- iOS 添加到主屏幕 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="出行">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="badge-proto">原型 · 交互演示</div>
+
+  <div class="stage">
+    <div class="device" id="device">
+      <div class="notch"></div>
+      <div class="statusbar"><span id="clock">9:41</span><span class="sb-right">▮▮▮ &nbsp;⌁&nbsp; ▰</span></div>
+      <main class="app" id="app"></main>
+      <div class="homebar"></div>
+    </div>
+  </div>
+
+  <script src="data.js" onerror="window.__dataFailed=true"></script>
+  <script src="app.js"></script>
+
+  <script>
+    /* 只在 HTTPS 下注册 SW：线上可离线打开，本地 http 开发不走缓存 */
+    if ('serviceWorker' in navigator && location.protocol === 'https:') {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function () {});
+      });
+    }
+  </script>
+</body>
+</html>
