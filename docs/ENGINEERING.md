@@ -88,6 +88,7 @@ docs/                   文档
 6. **每次改 UI 都要升 `APP_VER`**（注册页底部、个人信息页脚都显示），这是核对"是不是新版"的唯一手段。
 7. `.shots/` 已在 `.gitignore`；不要提交截图。
 8. **不要提交 `.env` 或任何密钥。**
+9. **每次改动必须提交并同步到远端。** 仓库带 `post-commit` 钩子自动 push；每个新克隆执行一次 `git config core.hooksPath tools/githooks`（Windows 上跑 `.\tools\install-hooks.ps1`）。
 
 ## 新增一个页面
 
@@ -116,6 +117,34 @@ node tools/shot.js      # 改了 UI 就出一版截图自查
 ```
 
 `check.js` 不需要浏览器；后四个需要 `python tools/serve.py` 在跑，且本机有 Chrome。
+
+## 同步到远端
+
+仓库用 git hook 做**自动推送**，不要再手动攒一批再推。
+
+**启用（每个克隆一次）**
+
+```bash
+git config core.hooksPath tools/githooks       # Linux / macOS / Git Bash
+```
+
+```powershell
+.\tools\install-hooks.ps1                      # Windows
+```
+
+**效果**：每次 `git commit` 完成后，`tools/githooks/post-commit` 会自动执行 `git push origin <当前分支>`，成功打印 `✓ 已同步到 origin/master`。
+
+**行为约定**
+
+| 情况 | 行为 |
+|---|---|
+| 没有 `origin` | 跳过，不影响提交 |
+| detached HEAD | 跳过 |
+| 推送成功 | 绿色提示 |
+| 推送失败（离线 / 非快进） | 黄色提示 + `git pull --rebase && git push`，**提交本身仍然成功** |
+| 停用 | `git config --unset core.hooksPath` |
+
+**注意**：钩子只看 `core.hooksPath`，`.git/hooks/` 里的旧钩子会被忽略。钩子脚本提交在仓库里，所以团队/服务器的行为一致——但**每台机器仍需执行一次启用命令**（这是本地配置，不随仓库同步）。
 
 ## 部署
 

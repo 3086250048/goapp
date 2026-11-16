@@ -1,0 +1,32 @@
+#!/bin/sh
+# ────────────────────────────────────────────────────────────────
+# 每次 commit 之后自动推送到 origin
+#
+# 启用（每个克隆执行一次）：git config core.hooksPath tools/githooks
+# 停用：                   git config --unset core.hooksPath
+#
+# 说明：
+#   - post-commit 的退出码不影响提交结果，推送失败不会让 commit 失败
+#   - detached HEAD、没有 origin 时自动跳过
+#   - 远端有新提交时不会自动 rebase（避免半路冲突留下坏状态），只提示
+# ────────────────────────────────────────────────────────────────
+
+# 没有 origin 就跳过（纯本地仓库 / 还没加远端）
+git remote get-url origin >/dev/null 2>&1 || exit 0
+
+# 钩子里不能有任何交互式提示，否则会卡住提交
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=10}"
+
+branch=$(git rev-parse --abbrev-ref HEAD)
+[ "$branch" = "HEAD" ] && exit 0
+
+if out=$(git push origin "$branch" 2>&1); then
+  printf '\033[32m✓ 已同步到 origin/%s\033[0m\n' "$branch"
+else
+  printf '\033[33m⚠ 自动同步失败，提交已保存在本地\033[0m\n'
+  printf '%s\n' "$out" | tail -n 3
+  printf '\033[33m  处理：git pull --rebase && git push\033[0m\n'
+fi
+
+exit 0
