@@ -49,7 +49,7 @@ sudo ./deploy/deploy.sh --domain trip.example.com
 首次部署完成后检查：
 
 ```json
-{"ok":true,"database":"sqlite","version":"2.1.0"}
+{"ok":true,"database":"sqlite","version":"2.2.0"}
 ```
 
 ## 2. 环境变量

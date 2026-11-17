@@ -28,7 +28,7 @@ import segno
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "prototype"
 ADMIN_STATIC_DIR = BASE_DIR / "admin"
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
 SEED_FILE = Path(__file__).resolve().with_name("seed.json")
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
 DB_FILE = DATA_DIR / "goapp.sqlite3"
@@ -47,7 +47,6 @@ with SEED_FILE.open(encoding="utf-8") as seed_handle:
     SEED = json.load(seed_handle)
 
 TAXONOMY = SEED["TAXONOMY"]
-TRIPS = {trip["id"]: trip for trip in SEED["TRIPS"]}
 
 DB_INIT_LOCK = threading.Lock()
 DB_INITIALIZED = False
@@ -89,6 +88,7 @@ def initialize_database() -> None:
                     id TEXT PRIMARY KEY,
                     payload TEXT NOT NULL,
                     active INTEGER NOT NULL DEFAULT 1,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL
                 );
 
@@ -217,18 +217,33 @@ def initialize_database() -> None:
                     ON admin_audit(created_at DESC);
                 """
             )
+            trip_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(trips)").fetchall()
+            }
+            if "sort_order" not in trip_columns:
+                conn.execute(
+                    "ALTER TABLE trips ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
+                )
             updated_at = now_iso()
-            for trip in SEED["TRIPS"]:
+            for sort_order, trip in enumerate(SEED["TRIPS"]):
                 conn.execute(
                     """
-                    INSERT INTO trips(id, payload, active, updated_at)
-                    VALUES (?, ?, 1, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        payload = excluded.payload,
-                        active = 1,
-                        updated_at = excluded.updated_at
+                    INSERT OR IGNORE INTO trips(id, payload, active, sort_order, updated_at)
+                    VALUES (?, ?, 1, ?, ?)
                     """,
-                    (trip["id"], json.dumps(trip, ensure_ascii=False), updated_at),
+                    (
+                        trip["id"],
+                        json.dumps(trip, ensure_ascii=False),
+                        sort_order,
+                        updated_at,
+                    ),
+                )
+                conn.execute(
+                    """
+                    UPDATE trips SET sort_order = ?
+                    WHERE id = ? AND sort_order = 0
+                    """,
+                    (sort_order, trip["id"]),
                 )
             for group_name, group in TAXONOMY.items():
                 for sort_order, option in enumerate(group["options"]):
@@ -332,6 +347,42 @@ def tag_usage_map(conn: sqlite3.Connection) -> dict[tuple[str, str], int]:
                 key = (group_name, code)
                 usage[key] = usage.get(key, 0) + 1
     return usage
+
+
+def trip_rows(
+    conn: sqlite3.Connection, active_only: bool = True
+) -> list[dict]:
+    where = " WHERE active = 1" if active_only else ""
+    rows = conn.execute(
+        "SELECT * FROM trips" + where + " ORDER BY sort_order, updated_at DESC"
+    ).fetchall()
+    result = []
+    for row in rows:
+        payload = parse_json(row["payload"], {})
+        payload["id"] = row["id"]
+        payload["sortOrder"] = row["sort_order"]
+        payload["active"] = bool(row["active"])
+        payload["updatedAt"] = row["updated_at"]
+        result.append(payload)
+    return result
+
+
+def trip_by_id(
+    conn: sqlite3.Connection, trip_id: str, active_only: bool = True
+) -> dict | None:
+    sql = "SELECT * FROM trips WHERE id = ?"
+    params = [trip_id]
+    if active_only:
+        sql += " AND active = 1"
+    row = conn.execute(sql, params).fetchone()
+    if not row:
+        return None
+    payload = parse_json(row["payload"], {})
+    payload["id"] = row["id"]
+    payload["sortOrder"] = row["sort_order"]
+    payload["active"] = bool(row["active"])
+    payload["updatedAt"] = row["updated_at"]
+    return payload
 
 
 def trip_stats(trip: dict, people: int) -> dict:
@@ -635,7 +686,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def catalog(self, conn: sqlite3.Connection) -> dict:
         return {
-            "trips": list(TRIPS.values()),
+            "trips": trip_rows(conn, active_only=True),
             "taxonomy": taxonomy_from_db(conn),
         }
 
@@ -893,7 +944,7 @@ class AppHandler(BaseHTTPRequestHandler):
             "detail": address["detail"],
             "isDefault": True,
         }
-        trip = TRIPS["t1"]
+        trip = trip_by_id(conn, "t1") or SEED["TRIPS"][0]
         travel = today_local() + timedelta(days=2)
         self.insert_order(
             conn,
@@ -1121,7 +1172,7 @@ class AppHandler(BaseHTTPRequestHandler):
         if not user:
             return
         body = self.read_json()
-        trip = TRIPS.get(str(body.get("tripId", "")))
+        trip = trip_by_id(conn, str(body.get("tripId", "")))
         try:
             people = int(body.get("people"))
             travel = date.fromisoformat(str(body.get("travelDate", "")))
@@ -1205,6 +1256,26 @@ class AppHandler(BaseHTTPRequestHandler):
             return
         if method == "GET" and path == "/api/admin/dashboard":
             self.admin_dashboard(conn)
+            return
+        if path == "/api/admin/trips":
+            if method == "GET":
+                self.admin_list_trips(conn)
+            elif method == "POST":
+                self.admin_create_trip(conn, admin_name)
+            else:
+                self.send_json({"error": "Method not allowed"}, 405)
+            return
+        trip_match = re.fullmatch(r"/api/admin/trips/([^/]+)", path)
+        if trip_match:
+            if method == "GET":
+                self.admin_get_trip(conn, trip_match.group(1))
+            elif method == "PATCH":
+                self.admin_update_trip(conn, admin_name, trip_match.group(1))
+            elif method == "DELETE":
+                self.read_json()
+                self.admin_delete_trip(conn, admin_name, trip_match.group(1))
+            else:
+                self.send_json({"error": "Method not allowed"}, 405)
             return
         if path == "/api/admin/users":
             if method == "GET":
@@ -1400,6 +1471,8 @@ class AppHandler(BaseHTTPRequestHandler):
             "vouchers": "SELECT COUNT(*) FROM vouchers",
             "tags": "SELECT COUNT(*) FROM taxonomy_tags",
             "enabledTags": "SELECT COUNT(*) FROM taxonomy_tags WHERE enabled = 1",
+            "trips": "SELECT COUNT(*) FROM trips",
+            "activeTrips": "SELECT COUNT(*) FROM trips WHERE active = 1",
         }.items():
             counts[name] = conn.execute(sql).fetchone()[0]
         revenue = conn.execute("SELECT COALESCE(SUM(total), 0) FROM orders").fetchone()[0]
@@ -1445,6 +1518,327 @@ class AppHandler(BaseHTTPRequestHandler):
                 "demoMode": DEMO_MODE,
             }
         )
+
+    def admin_trip_dict(self, row: sqlite3.Row, full: bool = False) -> dict:
+        payload = parse_json(row["payload"], {})
+        result = {
+            "id": row["id"],
+            "title": payload.get("title", ""),
+            "city": payload.get("city", ""),
+            "durationHours": payload.get("durationHours", 0),
+            "distance": payload.get("distance", 0),
+            "tags": payload.get("tags", []),
+            "cover": payload.get("cover", {}),
+            "stopCount": len(payload.get("stops", [])),
+            "active": bool(row["active"]),
+            "sortOrder": row["sort_order"],
+            "updatedAt": row["updated_at"],
+        }
+        try:
+            result["perPerson"] = trip_stats(payload, 2)["perPerson"]
+        except (TypeError, ValueError, KeyError):
+            result["perPerson"] = 0
+        if full:
+            result["stops"] = payload.get("stops", [])
+        return result
+
+    def admin_list_trips(self, conn: sqlite3.Connection) -> None:
+        q = self.query_value("q").strip()
+        active_filter = self.query_value("active").strip()
+        try:
+            page = max(1, int(self.query_value("page", "1")))
+            limit = min(100, max(1, int(self.query_value("limit", "30"))))
+        except ValueError:
+            self.send_json({"error": "分页参数错误"}, 400)
+            return
+        clauses = []
+        params = []
+        if q:
+            clauses.append("(payload LIKE ? OR id LIKE ?)")
+            params.extend([f"%{q}%", f"%{q}%"])
+        if active_filter in ("0", "1"):
+            clauses.append("active = ?")
+            params.append(int(active_filter))
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        total = conn.execute("SELECT COUNT(*) FROM trips" + where, params).fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM trips"
+            + where
+            + " ORDER BY sort_order, updated_at DESC LIMIT ? OFFSET ?",
+            [*params, limit, (page - 1) * limit],
+        ).fetchall()
+        self.send_json(
+            {
+                "items": [self.admin_trip_dict(row) for row in rows],
+                "total": total,
+                "page": page,
+                "limit": limit,
+            }
+        )
+
+    def admin_get_trip(self, conn: sqlite3.Connection, trip_id: str) -> None:
+        row = conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+        if not row:
+            self.send_json({"error": "首页项目不存在"}, 404)
+            return
+        self.send_json({"trip": self.admin_trip_dict(row, full=True)})
+
+    def admin_trip_values(self, body: dict) -> tuple[dict | None, list[str]]:
+        warnings = []
+        title = str(body.get("title", "")).strip()
+        city = str(body.get("city", "")).strip()
+        tags = body.get("tags", [])
+        cover = body.get("cover", {})
+        stops = body.get("stops", [])
+        try:
+            duration = int(body.get("durationHours", 0))
+            distance = int(body.get("distance", 0))
+            sort_order = int(body.get("sortOrder", 0))
+        except (TypeError, ValueError):
+            self.send_json({"error": "时长、距离或排序必须为整数"}, 400)
+            return None, warnings
+        if not 4 <= len(title) <= 30:
+            self.send_json({"error": "标题需为 4–30 个字"}, 400)
+            return None, warnings
+        if not 1 <= len(city) <= 20:
+            self.send_json({"error": "城市需为 1–20 个字"}, 400)
+            return None, warnings
+        if not 1 <= duration <= 24:
+            self.send_json({"error": "行程时长需在 1–24 小时"}, 400)
+            return None, warnings
+        if not 0 <= distance <= 200_000:
+            self.send_json({"error": "距离需在 0–200 公里"}, 400)
+            return None, warnings
+        if not 0 <= sort_order <= 9999:
+            self.send_json({"error": "排序值需在 0–9999"}, 400)
+            return None, warnings
+        if (
+            not isinstance(tags, list)
+            or not 1 <= len(tags) <= 2
+            or len(set(tags)) != len(tags)
+            or not set(tags) <= {"play", "food"}
+        ):
+            self.send_json({"error": "首页项目至少选择玩或吃一个标签"}, 400)
+            return None, warnings
+        if not isinstance(cover, dict):
+            self.send_json({"error": "封面配置错误"}, 400)
+            return None, warnings
+        color_re = re.compile(r"^#[0-9A-Fa-f]{6}$")
+        from_color = str(cover.get("from", ""))
+        to_color = str(cover.get("to", ""))
+        emoji = str(cover.get("emoji", "")).strip()
+        if (
+            not color_re.fullmatch(from_color)
+            or not color_re.fullmatch(to_color)
+            or not 1 <= len(emoji) <= 12
+        ):
+            self.send_json({"error": "封面颜色或 emoji 无效"}, 400)
+            return None, warnings
+        if not isinstance(stops, list) or not 1 <= len(stops) <= 12:
+            self.send_json({"error": "行程需包含 1–12 个站点"}, 400)
+            return None, warnings
+        normalized_stops = []
+        for stop_index, stop in enumerate(stops, start=1):
+            if not isinstance(stop, dict):
+                self.send_json({"error": f"第 {stop_index} 站格式错误"}, 400)
+                return None, warnings
+            name = str(stop.get("name", "")).strip()
+            stop_type = str(stop.get("type", "play"))
+            time_value = str(stop.get("time", "")).strip()
+            leg = str(stop.get("leg", "")).strip()
+            try:
+                stay = int(stop.get("stay", 0))
+            except (TypeError, ValueError):
+                stay = 0
+            if not 1 <= len(name) <= 40:
+                self.send_json({"error": f"第 {stop_index} 站名称无效"}, 400)
+                return None, warnings
+            if stop_type not in ("play", "food"):
+                self.send_json({"error": f"第 {stop_index} 站类型无效"}, 400)
+                return None, warnings
+            if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", time_value):
+                self.send_json({"error": f"第 {stop_index} 站时间需为 HH:MM"}, 400)
+                return None, warnings
+            if not 1 <= stay <= 720:
+                self.send_json({"error": f"第 {stop_index} 站停留时间无效"}, 400)
+                return None, warnings
+            if len(leg) > 40:
+                self.send_json({"error": f"第 {stop_index} 站交通说明过长"}, 400)
+                return None, warnings
+            items = stop.get("items", [])
+            if not isinstance(items, list) or not 1 <= len(items) <= 20:
+                self.send_json({"error": f"第 {stop_index} 站需包含 1–20 个消费项"}, 400)
+                return None, warnings
+            normalized_items = []
+            for item_index, item in enumerate(items, start=1):
+                if not isinstance(item, dict):
+                    self.send_json({"error": f"第 {stop_index} 站第 {item_index} 个消费项格式错误"}, 400)
+                    return None, warnings
+                item_name = str(item.get("name", "")).strip()
+                icon = str(item.get("icon", "")).strip()
+                mode = str(item.get("mode", "pp"))
+                try:
+                    price = int(item.get("price", 0))
+                except (TypeError, ValueError):
+                    price = -1
+                if not 1 <= len(item_name) <= 40 or not 1 <= len(icon) <= 12:
+                    self.send_json({"error": f"第 {stop_index} 站消费项名称或图标无效"}, 400)
+                    return None, warnings
+                if mode not in ("pp", "gp") or not 0 <= price <= 100_000:
+                    self.send_json({"error": f"第 {stop_index} 站消费项价格或计价方式无效"}, 400)
+                    return None, warnings
+                normalized_items.append(
+                    {
+                        "icon": icon,
+                        "name": item_name,
+                        "price": price,
+                        "mode": mode,
+                    }
+                )
+            normalized_stops.append(
+                {
+                    "name": name,
+                    "type": stop_type,
+                    "time": time_value,
+                    "stay": stay,
+                    "leg": leg,
+                    "items": normalized_items,
+                }
+            )
+        if not 12 <= len(title) <= 18:
+            warnings.append("标题建议控制在 12–18 字")
+        if not re.search(r"[逛游徒步漫步展温泉骑行露营爬赏探吃食餐咖啡夜市烧烤茶酒甜]", title):
+            warnings.append("标题缺少明确的玩或食关键词")
+        enabled = body.get("active", body.get("enabled", True))
+        if isinstance(enabled, str):
+            enabled = enabled.lower() in ("1", "true", "yes")
+        return (
+            {
+                "title": title,
+                "tags": tags,
+                "durationHours": duration,
+                "distance": distance,
+                "city": city,
+                "cover": {
+                    "from": from_color.upper(),
+                    "to": to_color.upper(),
+                    "emoji": emoji,
+                },
+                "stops": normalized_stops,
+                "sortOrder": sort_order,
+                "active": bool(enabled),
+            },
+            warnings,
+        )
+
+    def admin_create_trip(self, conn: sqlite3.Connection, admin_name: str) -> None:
+        values, warnings = self.admin_trip_values(self.read_json())
+        if values is None:
+            return
+        trip_id = "t_" + uuid.uuid4().hex[:10]
+        now = now_iso()
+        payload = {
+            key: values[key]
+            for key in ("title", "tags", "durationHours", "distance", "city", "cover", "stops")
+        }
+        conn.execute(
+            """
+            INSERT INTO trips(id, payload, active, sort_order, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                trip_id,
+                json.dumps(payload, ensure_ascii=False),
+                1 if values["active"] else 0,
+                values["sortOrder"],
+                now,
+            ),
+        )
+        self.audit(
+            conn,
+            admin_name,
+            "trip.create",
+            "trip",
+            trip_id,
+            {"title": values["title"], "active": values["active"]},
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+        self.send_json(
+            {
+                "ok": True,
+                "trip": self.admin_trip_dict(row, full=True),
+                "warnings": warnings,
+            },
+            201,
+        )
+
+    def admin_update_trip(
+        self, conn: sqlite3.Connection, admin_name: str, trip_id: str
+    ) -> None:
+        existing = conn.execute(
+            "SELECT * FROM trips WHERE id = ?", (trip_id,)
+        ).fetchone()
+        if not existing:
+            self.send_json({"error": "首页项目不存在"}, 404)
+            return
+        values, warnings = self.admin_trip_values(self.read_json())
+        if values is None:
+            return
+        payload = {
+            key: values[key]
+            for key in ("title", "tags", "durationHours", "distance", "city", "cover", "stops")
+        }
+        conn.execute(
+            """
+            UPDATE trips SET payload = ?, active = ?, sort_order = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                json.dumps(payload, ensure_ascii=False),
+                1 if values["active"] else 0,
+                values["sortOrder"],
+                now_iso(),
+                trip_id,
+            ),
+        )
+        self.audit(
+            conn,
+            admin_name,
+            "trip.update",
+            "trip",
+            trip_id,
+            {"title": values["title"], "active": values["active"]},
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+        self.send_json(
+            {
+                "ok": True,
+                "trip": self.admin_trip_dict(row, full=True),
+                "warnings": warnings,
+            }
+        )
+
+    def admin_delete_trip(
+        self, conn: sqlite3.Connection, admin_name: str, trip_id: str
+    ) -> None:
+        row = conn.execute("SELECT * FROM trips WHERE id = ?", (trip_id,)).fetchone()
+        if not row:
+            self.send_json({"error": "首页项目不存在"}, 404)
+            return
+        payload = parse_json(row["payload"], {})
+        conn.execute("DELETE FROM trips WHERE id = ?", (trip_id,))
+        self.audit(
+            conn,
+            admin_name,
+            "trip.delete",
+            "trip",
+            trip_id,
+            {"title": payload.get("title", ""), "active": bool(row["active"])},
+        )
+        conn.commit()
+        self.send_json({"ok": True})
 
     def admin_user_dict(self, row: sqlite3.Row) -> dict:
         keys = set(row.keys())

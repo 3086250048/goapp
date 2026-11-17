@@ -88,6 +88,15 @@ async function main() {
   await shot('dashboard.png');
   console.log(`✓ 仪表盘 ${dashboard.metrics} 个指标 · ${dashboard.admin}`);
 
+  await evalJs(`document.querySelector('[data-view="trips"]').click()`);
+  await waitFor(`document.querySelectorAll('tbody tr').length > 0`, '首页项目列表');
+  await evalJs(`document.querySelector('#addTripBtn').click()`);
+  await waitFor(`!document.querySelector('#modalRoot').hidden && !!document.querySelector('#tripForm')`, '首页项目编辑器');
+  const stops = await evalJs(`document.querySelectorAll('.stop-editor').length`);
+  if (stops < 1) throw new Error('首页项目编辑器缺少站点');
+  await evalJs(`document.querySelector('[data-close]').click()`);
+  console.log('✓ 首页项目列表与结构化编辑器');
+
   await evalJs(`document.querySelector('[data-view="users"]').click()`);
   await waitFor(`document.querySelectorAll('tbody tr').length > 0`, '用户列表');
   await evalJs(`document.querySelector('#addUserBtn').click()`);

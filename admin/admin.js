@@ -12,11 +12,15 @@ const state = {
   orderStatus: '',
   auditPage: 1,
   tagGroup: '',
-  tagQuery: ''
+  tagQuery: '',
+  tripPage: 1,
+  tripQuery: '',
+  tripActive: ''
 };
 
 const VIEW_META = {
   dashboard: ['OVERVIEW', '数据概览'],
+  trips: ['HOME FEED', '首页项目'],
   users: ['CUSTOMERS', '用户管理'],
   tags: ['TAXONOMY', '标签管理'],
   orders: ['ORDERS', '订单查询'],
@@ -45,7 +49,10 @@ const ACTION_LABEL = {
   'user.delete': '删除用户',
   'tag.create': '新增标签',
   'tag.update': '修改标签',
-  'tag.delete': '删除标签'
+  'tag.delete': '删除标签',
+  'trip.create': '新增首页项目',
+  'trip.update': '修改首页项目',
+  'trip.delete': '删除首页项目'
 };
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
@@ -118,6 +125,7 @@ async function navigate(view) {
   $('#view').innerHTML = '<div class="empty-state"><b>◌</b>正在加载数据…</div>';
   try {
     if (view === 'dashboard') await renderDashboard();
+    if (view === 'trips') await renderTrips();
     if (view === 'users') await renderUsers();
     if (view === 'tags') await renderTags();
     if (view === 'orders') await renderOrders();
@@ -194,7 +202,8 @@ async function renderDashboard() {
       <section class="panel">
         <div class="panel-head"><div><h2>快捷操作</h2><p>常用管理入口</p></div></div>
         <div class="panel-body" style="display:flex;gap:10px;flex-wrap:wrap">
-          <button class="primary" data-action="add-user">＋ 新增用户</button>
+          <button class="primary" data-action="add-trip">＋ 新增首页项目</button>
+          <button class="secondary" data-action="add-user">新增用户</button>
           <button class="secondary" data-go="tags">管理标签</button>
           <button class="secondary" data-go="orders">查询订单</button>
         </div>
@@ -202,6 +211,234 @@ async function renderDashboard() {
     </div>`;
   $$('[data-go]', $('#view')).forEach(button => button.onclick = () => navigate(button.dataset.go));
   $('[data-action="add-user"]', $('#view')).onclick = () => openUserModal();
+  $('[data-action="add-trip"]', $('#view')).onclick = () => openTripModal();
+}
+
+function tripBadge(tags) {
+  return tags.includes('play') && tags.includes('food') ? '玩·吃' : tags.includes('play') ? '玩' : '吃';
+}
+
+async function renderTrips() {
+  const params = new URLSearchParams({
+    q: state.tripQuery, active: state.tripActive, page: state.tripPage, limit: 30
+  });
+  const data = await api(`/api/admin/trips?${params}`);
+  const rows = data.items.length ? data.items.map(trip => `<tr>
+    <td><div class="trip-cell"><div class="trip-thumb" style="background:linear-gradient(145deg,${esc(trip.cover.from)},${esc(trip.cover.to)})">${esc(trip.cover.emoji)}</div><div><span class="cell-main">${esc(trip.title)}</span><span class="cell-sub">${esc(trip.id)} · ${esc(trip.city)}</span></div></div></td>
+    <td><span class="chip">${tripBadge(trip.tags)}</span><span class="cell-sub">${trip.stopCount} 站 · ${trip.durationHours} 小时</span></td>
+    <td><span class="cell-main">${money(trip.perPerson)}/人</span><span class="cell-sub">${(trip.distance / 1000).toFixed(1)} km</span></td>
+    <td><span class="cell-main">${trip.sortOrder}</span></td>
+    <td><span class="status ${trip.active ? 'completed' : 'expired'}">${trip.active ? '已上线' : '已下线'}</span></td>
+    <td>${shortDate(trip.updatedAt)}</td>
+    <td><div class="actions">
+      <button class="action" data-edit-trip="${trip.id}" title="编辑">✎</button>
+      <button class="action" data-preview-trip="${trip.id}" title="预览">↗</button>
+      <button class="action delete" data-delete-trip="${trip.id}" title="删除">⌫</button>
+    </div></td>
+  </tr>`).join('') : '<tr><td colspan="7"><div class="empty-state"><b>▥</b>没有找到首页项目</div></td></tr>';
+  $('#view').innerHTML = `
+    <div class="toolbar">
+      <div class="toolbar-left"><label class="search"><span>⌕</span><input id="tripQuery" placeholder="搜索标题、城市或项目 ID" value="${esc(state.tripQuery)}"></label><button class="secondary" id="tripSearchBtn">搜索</button></div>
+      <div class="toolbar-right"><select class="select" id="tripActive"><option value="">全部状态</option><option value="1" ${state.tripActive === '1' ? 'selected' : ''}>已上线</option><option value="0" ${state.tripActive === '0' ? 'selected' : ''}>已下线</option></select><button class="primary" id="addTripBtn">＋ 新增首页项目</button></div>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>项目</th><th>玩法</th><th>人均 / 距离</th><th>排序</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="pager"><span>共 ${data.total} 个首页项目</span><button id="tripPrev" ${state.tripPage <= 1 ? 'disabled' : ''}>上一页</button><span>${state.tripPage}</span><button id="tripNext" ${state.tripPage * data.limit >= data.total ? 'disabled' : ''}>下一页</button></div>`;
+  const search = () => {
+    state.tripQuery = $('#tripQuery').value.trim();
+    state.tripActive = $('#tripActive').value;
+    state.tripPage = 1;
+    renderTrips();
+  };
+  $('#tripSearchBtn').onclick = search;
+  $('#tripQuery').onkeydown = event => { if (event.key === 'Enter') search(); };
+  $('#tripActive').onchange = search;
+  $('#addTripBtn').onclick = () => openTripModal();
+  $('#tripPrev').onclick = () => { state.tripPage--; renderTrips(); };
+  $('#tripNext').onclick = () => { state.tripPage++; renderTrips(); };
+  $$('[data-edit-trip]').forEach(button => button.onclick = () => openTripModal(button.dataset.editTrip));
+  $$('[data-preview-trip]').forEach(button => button.onclick = () => window.open(`/?demo=1#/detail/${button.dataset.previewTrip}`, '_blank'));
+  $$('[data-delete-trip]').forEach(button => button.onclick = () => deleteTrip(button.dataset.deleteTrip));
+}
+
+function tripItemEditor(item = { icon: '📍', name: '', price: 0, mode: 'pp' }) {
+  return `<div class="item-editor" data-item>
+    <input class="mini-input icon-input" data-field="icon" value="${esc(item.icon)}" placeholder="图标" maxlength="12">
+    <input class="mini-input" data-field="name" value="${esc(item.name)}" placeholder="消费项名称" maxlength="40">
+    <select class="mini-input" data-field="mode"><option value="pp" ${item.mode === 'pp' ? 'selected' : ''}>每人</option><option value="gp" ${item.mode === 'gp' ? 'selected' : ''}>整团</option></select>
+    <input class="mini-input price-input" data-field="price" type="number" min="0" value="${Number(item.price || 0)}" placeholder="价格">
+    <button type="button" class="mini-remove" data-remove-item title="删除消费项">×</button>
+  </div>`;
+}
+
+function tripStopEditor(stop = {}) {
+  const items = (stop.items || []).length ? stop.items : [{ icon: '📍', name: '', price: 0, mode: 'pp' }];
+  return `<section class="stop-editor" data-stop>
+    <div class="stop-editor-head"><b class="stop-number">站点</b><button type="button" class="mini-remove" data-remove-stop>移除站点</button></div>
+    <div class="form-grid">
+      <div class="field"><label>站点名称</label><input data-field="name" maxlength="40" value="${esc(stop.name || '')}" placeholder="例如 城市博物馆" required></div>
+      <div class="field"><label>类型</label><select data-field="type"><option value="play" ${stop.type !== 'food' ? 'selected' : ''}>游玩</option><option value="food" ${stop.type === 'food' ? 'selected' : ''}>餐饮</option></select></div>
+      <div class="field"><label>到达时间</label><input data-field="time" type="time" value="${esc(stop.time || '10:00')}" required></div>
+      <div class="field"><label>停留分钟</label><input data-field="stay" type="number" min="1" max="720" value="${Number(stop.stay || 60)}" required></div>
+      <div class="field full"><label>到下一站交通</label><input data-field="leg" maxlength="40" value="${esc(stop.leg || '')}" placeholder="例如 步行 8 分钟"></div>
+    </div>
+    <div class="item-editor-head"><span>消费项</span><button type="button" data-add-item>＋ 添加消费项</button></div>
+    <div class="item-editor-list">${items.map(tripItemEditor).join('')}</div>
+  </section>`;
+}
+
+function renumberStops(form) {
+  $$('.stop-editor', form).forEach((stop, index) => {
+    $('.stop-number', stop).textContent = `第 ${index + 1} 站`;
+  });
+}
+
+async function openTripModal(tripId = null) {
+  let trip = null;
+  if (tripId) trip = (await api(`/api/admin/trips/${tripId}`)).trip;
+  const data = trip || {
+    title: '', city: '本地', durationHours: 6, distance: 1000, tags: ['play'],
+    cover: { from: '#D79A6A', to: '#8A4B2C', emoji: '🧭' },
+    active: true, sortOrder: 0, stops: []
+  };
+  if (!data.stops.length) data.stops = [{}];
+  openModal({
+    title: tripId ? '编辑首页项目' : '新增首页项目',
+    subtitle: '保存后会进入用户首页候选池；下线项目不会展示',
+    wide: true,
+    body: `<form id="tripForm" class="trip-form">
+      <section class="editor-section">
+        <div class="editor-section-head"><h3>基础信息</h3><span>首页卡片只展示标题、站数、时长和人均</span></div>
+        <div class="form-grid">
+          <div class="field full"><label>标题</label><input data-field="title" maxlength="30" value="${esc(data.title)}" placeholder="例如 周末古镇漫步 + 特色小吃" required><small>建议 12–18 字，并包含玩或食关键词</small></div>
+          <div class="field"><label>城市 / 区域</label><input data-field="city" maxlength="20" value="${esc(data.city)}" required></div>
+          <div class="field"><label>距离（公里）</label><input data-field="distanceKm" type="number" min="0" max="200" step="0.1" value="${(Number(data.distance || 0) / 1000).toFixed(1)}" required></div>
+          <div class="field"><label>时长（小时）</label><input data-field="durationHours" type="number" min="1" max="24" value="${Number(data.durationHours || 6)}" required></div>
+          <div class="field"><label>排序</label><input data-field="sortOrder" type="number" min="0" max="9999" value="${Number(data.sortOrder || 0)}"></div>
+          <div class="field"><label>发布状态</label><select data-field="active"><option value="1" ${data.active ? 'selected' : ''}>上线</option><option value="0" ${!data.active ? 'selected' : ''}>下线</option></select></div>
+          <div class="field"><label>内容标签</label><div class="check-grid"><label class="check-option"><input type="checkbox" name="tripTag" value="play" ${data.tags.includes('play') ? 'checked' : ''}><span>玩</span></label><label class="check-option"><input type="checkbox" name="tripTag" value="food" ${data.tags.includes('food') ? 'checked' : ''}><span>吃</span></label></div></div>
+        </div>
+      </section>
+      <section class="editor-section">
+        <div class="editor-section-head"><h3>封面</h3><span>使用品牌渐变与 emoji 占位</span></div>
+        <div class="cover-editor">
+          <div class="cover-preview" id="coverPreview" style="background:linear-gradient(145deg,${esc(data.cover.from)},${esc(data.cover.to)})"><span>${esc(data.cover.emoji)}</span></div>
+          <div class="form-grid">
+            <div class="field"><label>起始颜色</label><input data-field="coverFrom" type="color" value="${esc(data.cover.from)}"></div>
+            <div class="field"><label>结束颜色</label><input data-field="coverTo" type="color" value="${esc(data.cover.to)}"></div>
+            <div class="field"><label>Emoji</label><input data-field="coverEmoji" value="${esc(data.cover.emoji)}" maxlength="12"></div>
+          </div>
+        </div>
+      </section>
+      <section class="editor-section">
+        <div class="editor-section-head"><h3>站点与消费明细</h3><span>一站点对应一张用户凭证</span></div>
+        <div id="stopEditors">${data.stops.map(tripStopEditor).join('')}</div>
+        <button type="button" class="add-stop-btn" id="addStopBtn">＋ 添加站点</button>
+      </section>
+    </form>`,
+    footer: '<button class="secondary" data-close>取消</button><button class="primary" id="saveTripBtn">保存首页项目</button>'
+  });
+  const form = $('#tripForm');
+  renumberStops(form);
+  const updateCover = () => {
+    $('#coverPreview').style.background = `linear-gradient(145deg,${$('[data-field="coverFrom"]', form).value},${$('[data-field="coverTo"]', form).value})`;
+    $('#coverPreview span').textContent = $('[data-field="coverEmoji"]', form).value;
+  };
+  $('[data-field="coverFrom"]', form).oninput = updateCover;
+  $('[data-field="coverTo"]', form).oninput = updateCover;
+  $('[data-field="coverEmoji"]', form).oninput = updateCover;
+  $('#addStopBtn').onclick = () => {
+    if ($$('.stop-editor', form).length >= 12) return toast('最多 12 个站点');
+    $('#stopEditors').insertAdjacentHTML('beforeend', tripStopEditor({}));
+    renumberStops(form);
+  };
+  form.addEventListener('click', event => {
+    const removeStop = event.target.closest('[data-remove-stop]');
+    if (removeStop) {
+      if ($$('.stop-editor', form).length <= 1) return toast('至少保留一个站点');
+      removeStop.closest('.stop-editor').remove();
+      renumberStops(form);
+      return;
+    }
+    const addItem = event.target.closest('[data-add-item]');
+    if (addItem) {
+      const list = $('.item-editor-list', addItem.closest('.stop-editor'));
+      if ($$('.item-editor', list).length >= 20) return toast('每站最多 20 个消费项');
+      list.insertAdjacentHTML('beforeend', tripItemEditor());
+      return;
+    }
+    const removeItem = event.target.closest('[data-remove-item]');
+    if (removeItem) {
+      const list = removeItem.closest('.item-editor-list');
+      if ($$('.item-editor', list).length <= 1) return toast('每站至少保留一个消费项');
+      removeItem.closest('.item-editor').remove();
+    }
+  });
+  $('#saveTripBtn').onclick = async () => {
+    const tags = $$('input[name="tripTag"]:checked', form).map(input => input.value);
+    if (!tags.length) return toast('至少选择玩或吃标签');
+    const stops = $$('.stop-editor', form).map(stop => ({
+      name: $('[data-field="name"]', stop).value.trim(),
+      type: $('[data-field="type"]', stop).value,
+      time: $('[data-field="time"]', stop).value,
+      stay: Number($('[data-field="stay"]', stop).value),
+      leg: $('[data-field="leg"]', stop).value.trim(),
+      items: $$('.item-editor', stop).map(item => ({
+        icon: $('[data-field="icon"]', item).value.trim(),
+        name: $('[data-field="name"]', item).value.trim(),
+        mode: $('[data-field="mode"]', item).value,
+        price: Number($('[data-field="price"]', item).value || 0)
+      }))
+    }));
+    const payload = {
+      title: $('[data-field="title"]', form).value.trim(),
+      city: $('[data-field="city"]', form).value.trim(),
+      durationHours: Number($('[data-field="durationHours"]', form).value),
+      distance: Math.round(Number($('[data-field="distanceKm"]', form).value) * 1000),
+      sortOrder: Number($('[data-field="sortOrder"]', form).value || 0),
+      active: $('[data-field="active"]', form).value === '1',
+      tags,
+      cover: {
+        from: $('[data-field="coverFrom"]', form).value,
+        to: $('[data-field="coverTo"]', form).value,
+        emoji: $('[data-field="coverEmoji"]', form).value.trim()
+      },
+      stops
+    };
+    const button = $('#saveTripBtn');
+    button.disabled = true;
+    try {
+      const result = await api(tripId ? `/api/admin/trips/${tripId}` : '/api/admin/trips', {
+        method: tripId ? 'PATCH' : 'POST', body: payload
+      });
+      closeModal();
+      toast(result.warnings?.length ? result.warnings[0] : (tripId ? '首页项目已更新' : '首页项目已创建'));
+      renderTrips();
+      if (state.view === 'dashboard') renderDashboard();
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message);
+    }
+  };
+}
+
+function deleteTrip(tripId) {
+  openModal({
+    title: '删除首页项目',
+    subtitle: '此操作不可撤销',
+    small: true,
+    body: '<div class="confirm-copy">确认删除这个首页项目？<br>已产生的订单和凭证会保留历史快照，不受影响。</div>',
+    footer: '<button class="secondary" data-close>取消</button><button class="primary" id="confirmDeleteTrip">确认删除</button>'
+  });
+  $('#confirmDeleteTrip').onclick = async () => {
+    try {
+      await api(`/api/admin/trips/${tripId}`, { method: 'DELETE', body: {} });
+      closeModal();
+      toast('首页项目已删除');
+      renderTrips();
+    } catch (error) {
+      toast(error.message);
+    }
+  };
 }
 
 function profileChips(profile) {
@@ -565,10 +802,10 @@ async function renderAudit() {
   $('#auditNext').onclick = () => { state.auditPage++; renderAudit(); };
 }
 
-function openModal({ title, subtitle = '', body, footer = '', small = false }) {
+function openModal({ title, subtitle = '', body, footer = '', small = false, wide = false }) {
   const root = $('#modalRoot');
   root.hidden = false;
-  root.innerHTML = `<section class="modal ${small ? 'small' : ''}" role="dialog" aria-modal="true">
+  root.innerHTML = `<section class="modal ${small ? 'small' : ''} ${wide ? 'wide' : ''}" role="dialog" aria-modal="true">
     <header class="modal-head"><div><h2>${esc(title)}</h2>${subtitle ? `<p>${esc(subtitle)}</p>` : ''}</div><button class="modal-close" data-close>×</button></header>
     <div class="modal-body">${body}</div>
     ${footer ? `<footer class="modal-foot">${footer}</footer>` : ''}

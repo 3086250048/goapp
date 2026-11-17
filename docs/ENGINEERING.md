@@ -76,7 +76,7 @@ Android 包使用 `aapt2 + javac + dx + apksigner` 构建，不依赖 Gradle。A
 
 | 表 | 用途 |
 |---|---|
-| `trips` | 服务端权威行程内容，启动时从 `server/seed.json` 同步 |
+| `trips` | 服务端权威首页项目；首次从 `server/seed.json` 导入，之后由管理后台维护 |
 | `users` | 手机号、昵称和四类画像 |
 | `sessions` | 只存会话 token 的 SHA-256 哈希，30 天过期 |
 | `otp_challenges` | 验证码哈希、过期时间与尝试次数 |
@@ -106,6 +106,8 @@ Android 包使用 `aapt2 + javac + dx + apksigner` 构建，不依赖 Gradle。A
 | `GET` | `/api/vouchers/:id/qr.svg` | 当前用户有权限的真实二维码 |
 | `POST` | `/api/admin/login` | 管理员登录，独立 HttpOnly Cookie |
 | `GET` | `/api/admin/dashboard` | 后台统计与最近订单/用户 |
+| `GET/POST` | `/api/admin/trips` | 首页项目分页搜索与新增 |
+| `GET/PATCH/DELETE` | `/api/admin/trips/:id` | 首页项目详情、编辑、上下线与删除 |
 | `GET/POST` | `/api/admin/users` | 用户分页搜索与新增 |
 | `GET/PATCH/DELETE` | `/api/admin/users/:id` | 用户详情、修改与级联删除 |
 | `GET/POST` | `/api/admin/tags` | 标签列表与新增 |

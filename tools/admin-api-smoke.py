@@ -64,6 +64,41 @@ def main() -> None:
     print("✓ 仪表盘")
 
     suffix = secrets.token_hex(4)
+    trip_payload = {
+        "title": "自检城市漫步 + 特色咖啡",
+        "city": "本地",
+        "durationHours": 5,
+        "distance": 2300,
+        "sortOrder": 998,
+        "active": True,
+        "tags": ["play", "food"],
+        "cover": {"from": "#D79A6A", "to": "#8A4B2C", "emoji": "☕"},
+        "stops": [
+            {
+                "name": "自检街区",
+                "type": "play",
+                "time": "10:00",
+                "stay": 90,
+                "leg": "步行 5 分钟",
+                "items": [
+                    {"icon": "🚶", "name": "街区漫步", "price": 0, "mode": "pp"},
+                    {"icon": "☕", "name": "手冲咖啡", "price": 38, "mode": "pp"},
+                ],
+            }
+        ],
+    }
+    trip = json_request("/api/admin/trips", "POST", trip_payload)["trip"]
+    catalog = json_request("/api/bootstrap")["catalog"]["trips"]
+    assert any(item["id"] == trip["id"] for item in catalog)
+    print("✓ 首页项目创建并进入用户目录")
+
+    trip_payload["title"] = "自检城市夜游 + 特色咖啡"
+    trip_payload["active"] = False
+    json_request(f"/api/admin/trips/{trip['id']}", "PATCH", trip_payload)
+    catalog = json_request("/api/bootstrap")["catalog"]["trips"]
+    assert all(item["id"] != trip["id"] for item in catalog)
+    print("✓ 首页项目下线")
+
     tag_code = f"smoke_{suffix}"
     tag = json_request(
         "/api/admin/tags",
@@ -117,11 +152,13 @@ def main() -> None:
     print("✓ 标签引用清理")
 
     json_request(f"/api/admin/users/{user['id']}", "DELETE", {})
+    json_request(f"/api/admin/trips/{trip['id']}", "DELETE", {})
     orders = json_request("/api/admin/orders?limit=1")
     audit = json_request("/api/admin/audit?limit=10")
     assert orders["total"] >= 0 and audit["total"] >= 1
     assert any(item["action"] == "user.delete" for item in audit["items"])
-    print("✓ 用户删除、订单查询与审计")
+    assert any(item["action"] == "trip.delete" for item in audit["items"])
+    print("✓ 用户/首页项目删除、订单查询与审计")
 
     json_request("/api/admin/logout", "POST", {})
     assert request("/api/admin/dashboard")[0] == 401
