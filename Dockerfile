@@ -7,7 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080 \
     DATA_DIR=/data \
     DEMO_MODE=1 \
-    DEMO_OTP=123456
+    DEMO_OTP=123456 \
+    ADMIN_USERNAME=admin
 
 WORKDIR /app
 
@@ -15,6 +16,7 @@ COPY server/requirements.txt /app/server/requirements.txt
 RUN pip install --no-cache-dir --index-url "$PIP_INDEX_URL" -r /app/server/requirements.txt
 
 COPY prototype /app/prototype
+COPY admin /app/admin
 COPY server /app/server
 
 RUN mkdir -p /data && useradd --create-home --uid 10001 goapp \

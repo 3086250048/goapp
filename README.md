@@ -106,6 +106,7 @@ compose.yaml        本地/单机部署编排与数据卷
 deploy/deploy.sh    一键部署、更新与 HTTPS 验收入口
 deploy/deploy.ps1   Windows / WSL 入口
 android/            原生 Android WebView 壳与 APK 构建脚本
+admin/              管理后台静态页面
 ```
 
 ## 部署
@@ -135,6 +136,24 @@ APP_URL=https://你的域名/ ./android/build-apk.sh
 
 不传 `APP_URL` 时优先读取 `.env` 的 `DOMAIN`。产物为 `dist/goapp-v<版本>.apk`，最低支持 Android 6.0，需要联网访问后端。
 
+## 管理后台
+
+访问 `/admin/`，使用部署时生成的 `ADMIN_USERNAME` 与 `ADMIN_PASSWORD` 登录。首次一键部署会自动生成密码并写入权限为 600 的 `.env`：
+
+```bash
+grep '^ADMIN_' .env
+```
+
+后台支持：
+
+- 数据概览：用户、订单、交易额、凭证和标签状态
+- 用户管理：搜索、新增、编辑画像、删除及级联清理订单凭证
+- 标签管理：四类标签增删改查、启停、排序和引用数量
+- 订单查询：按状态、订单号、用户或行程筛选并查看逐站凭证
+- 操作日志：记录管理员登录及所有用户、标签写操作
+
+标签修改直接写入 SQLite，用户端下一次启动会读取最新启用标签，无需重新部署。
+
 ## 自检
 
 ```bash
@@ -142,6 +161,7 @@ node tools/check.js
 BASE_URL=http://127.0.0.1:18080 python3 tools/api-smoke.py
 node tools/browser-smoke.js   # 需先启动 CDP_URL 指向的 Chromium
 ./tools/check-deploy.sh
+ADMIN_PASSWORD="$(sed -n 's/^ADMIN_PASSWORD=//p' .env)" python3 tools/admin-api-smoke.py
 ```
 
 `check.js` 覆盖页面渲染、事件绑定、导航和价格模型；`api-smoke.py` 覆盖静态站、体验会话、下单、二维码、持久化和退出登录；`browser-smoke.js` 覆盖真实浏览器里的首页、下单和凭证渲染。

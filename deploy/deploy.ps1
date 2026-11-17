@@ -10,7 +10,9 @@ param(
     [string]$RestoreFile = "",
     [string]$Branch = "master",
     [int]$SshPort = 22,
-    [ValidateSet("0", "1")][string]$DemoMode = "1"
+    [ValidateSet("0", "1")][string]$DemoMode = "1",
+    [string]$AdminUser = "",
+    [string]$AdminPassword = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,6 +44,12 @@ if ($RestoreFile) {
         throw "无法把数据库备份路径转换为 WSL 路径"
     }
     $bashArgs += @("--restore-file", $wslRestore)
+}
+if ($AdminUser) {
+    $bashArgs += @("--admin-user", $AdminUser)
+}
+if ($AdminPassword) {
+    $bashArgs += @("--admin-password", $AdminPassword)
 }
 
 function Quote-Bash([string]$Value) {

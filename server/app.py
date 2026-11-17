@@ -20,13 +20,15 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import segno
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "prototype"
+ADMIN_STATIC_DIR = BASE_DIR / "admin"
+APP_VERSION = "2.1.0"
 SEED_FILE = Path(__file__).resolve().with_name("seed.json")
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
 DB_FILE = DATA_DIR / "goapp.sqlite3"
@@ -34,7 +36,10 @@ PORT = int(os.getenv("PORT", "8080"))
 DEMO_MODE = os.getenv("DEMO_MODE", "0") == "1"
 DEMO_OTP = os.getenv("DEMO_OTP", "123456" if DEMO_MODE else "")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 SESSION_DAYS = 30
+ADMIN_SESSION_HOURS = 12
 OTP_MINUTES = 10
 PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
 
@@ -46,6 +51,8 @@ TRIPS = {trip["id"]: trip for trip in SEED["TRIPS"]}
 
 DB_INIT_LOCK = threading.Lock()
 DB_INITIALIZED = False
+ADMIN_LOGIN_LOCK = threading.Lock()
+ADMIN_LOGIN_FAILURES: dict[str, list[datetime]] = {}
 
 
 def now_iso() -> str:
@@ -169,6 +176,45 @@ def initialize_database() -> None:
 
                 CREATE INDEX IF NOT EXISTS idx_vouchers_order
                     ON vouchers(order_id, seq);
+
+                CREATE TABLE IF NOT EXISTS taxonomy_tags (
+                    id TEXT PRIMARY KEY,
+                    group_name TEXT NOT NULL,
+                    code TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(group_name, code)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_taxonomy_group_sort
+                    ON taxonomy_tags(group_name, enabled DESC, sort_order, label);
+
+                CREATE TABLE IF NOT EXISTS admin_sessions (
+                    token_hash TEXT PRIMARY KEY,
+                    admin_name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry
+                    ON admin_sessions(expires_at);
+
+                CREATE TABLE IF NOT EXISTS admin_audit (
+                    id TEXT PRIMARY KEY,
+                    admin_name TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    target_type TEXT NOT NULL,
+                    target_id TEXT,
+                    details_json TEXT NOT NULL,
+                    ip TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_admin_audit_created
+                    ON admin_audit(created_at DESC);
                 """
             )
             updated_at = now_iso()
@@ -184,6 +230,26 @@ def initialize_database() -> None:
                     """,
                     (trip["id"], json.dumps(trip, ensure_ascii=False), updated_at),
                 )
+            for group_name, group in TAXONOMY.items():
+                for sort_order, option in enumerate(group["options"]):
+                    code, label = option
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO taxonomy_tags(
+                            id, group_name, code, label, enabled, sort_order,
+                            created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+                        """,
+                        (
+                            uuid.uuid4().hex,
+                            group_name,
+                            code,
+                            label,
+                            sort_order,
+                            updated_at,
+                            updated_at,
+                        ),
+                    )
             conn.commit()
         finally:
             conn.close()
@@ -215,6 +281,59 @@ def parse_json(value: str | None, fallback):
         return fallback
 
 
+TAG_GROUPS = ("hobby", "personality", "occupation", "gender")
+
+
+def taxonomy_from_db(conn: sqlite3.Connection) -> dict:
+    taxonomy = {}
+    for group_name in TAG_GROUPS:
+        base = TAXONOMY[group_name]
+        rows = conn.execute(
+            """
+            SELECT code, label FROM taxonomy_tags
+            WHERE group_name = ? AND enabled = 1
+            ORDER BY sort_order, label
+            """,
+            (group_name,),
+        ).fetchall()
+        taxonomy[group_name] = {
+            "title": base["title"],
+            "hint": base["hint"],
+            "mode": base["mode"],
+            "max": base["max"],
+            "min": base.get("min", 0),
+            "options": [[row["code"], row["label"]] for row in rows],
+        }
+    return taxonomy
+
+
+def all_tag_codes(conn: sqlite3.Connection) -> dict[str, set[str]]:
+    result = {group: set() for group in TAG_GROUPS}
+    rows = conn.execute("SELECT group_name, code FROM taxonomy_tags").fetchall()
+    for row in rows:
+        if row["group_name"] in result:
+            result[row["group_name"]].add(row["code"])
+    return result
+
+
+def tag_usage_map(conn: sqlite3.Connection) -> dict[tuple[str, str], int]:
+    usage = {}
+    for user in conn.execute(
+        "SELECT hobby_json, personality_json, occupation, gender FROM users"
+    ).fetchall():
+        values = {
+            "hobby": parse_json(user["hobby_json"], []),
+            "personality": parse_json(user["personality_json"], []),
+            "occupation": [user["occupation"]] if user["occupation"] else [],
+            "gender": [user["gender"]] if user["gender"] else [],
+        }
+        for group_name, codes in values.items():
+            for code in codes:
+                key = (group_name, code)
+                usage[key] = usage.get(key, 0) + 1
+    return usage
+
+
 def trip_stats(trip: dict, people: int) -> dict:
     pp = 0
     gp = 0
@@ -240,7 +359,7 @@ def iso_or_blank(value: datetime | None) -> str | None:
 
 
 class AppHandler(BaseHTTPRequestHandler):
-    server_version = "Goapp/2.0.1"
+    server_version = f"Goapp/{APP_VERSION}"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args) -> None:
@@ -262,12 +381,20 @@ class AppHandler(BaseHTTPRequestHandler):
     def do_PATCH(self) -> None:
         self.dispatch("PATCH")
 
+    def do_DELETE(self) -> None:
+        self.dispatch("DELETE")
+
     def dispatch(self, method: str) -> None:
         initialize_database()
         try:
             path = urlsplit(self.path).path
             if path.startswith("/api/"):
                 self.handle_api(method, path)
+            elif path == "/admin":
+                self.send_response(HTTPStatus.PERMANENT_REDIRECT)
+                self.send_header("Location", "/admin/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
             elif method in ("GET", "HEAD"):
                 self.serve_static(path, head_only=method == "HEAD")
             else:
@@ -334,18 +461,23 @@ class AppHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def serve_static(self, request_path: str, head_only: bool = False) -> None:
-        rel = unquote(request_path).lstrip("/")
+        if request_path.startswith("/admin/"):
+            static_root = ADMIN_STATIC_DIR
+            rel = unquote(request_path[len("/admin/") :]).lstrip("/")
+        else:
+            static_root = STATIC_DIR
+            rel = unquote(request_path).lstrip("/")
         if not rel or rel.endswith("/"):
             rel += "index.html"
-        candidate = (STATIC_DIR / rel).resolve()
+        candidate = (static_root / rel).resolve()
         try:
-            candidate.relative_to(STATIC_DIR.resolve())
+            candidate.relative_to(static_root.resolve())
         except ValueError:
             self.send_json({"error": "Not found"}, 404)
             return
         if not candidate.is_file():
             if "." not in Path(rel).name:
-                candidate = STATIC_DIR / "index.html"
+                candidate = static_root / "index.html"
             else:
                 self.send_json({"error": "Not found"}, 404)
                 return
@@ -420,8 +552,11 @@ class AppHandler(BaseHTTPRequestHandler):
     def handle_api(self, method: str, path: str) -> None:
         conn = db()
         try:
+            if path.startswith("/api/admin/"):
+                self.handle_admin_api(conn, method, path)
+                return
             if method == "GET" and path == "/api/health":
-                self.send_json({"ok": True, "database": "sqlite", "version": "2.0.1"})
+                self.send_json({"ok": True, "database": "sqlite", "version": APP_VERSION})
                 return
             if method == "GET" and path == "/api/bootstrap":
                 self.get_bootstrap(conn)
@@ -469,7 +604,7 @@ class AppHandler(BaseHTTPRequestHandler):
 
     def get_bootstrap(self, conn: sqlite3.Connection) -> None:
         user = self.current_user(conn)
-        catalog = {"trips": list(TRIPS.values()), "taxonomy": TAXONOMY}
+        catalog = self.catalog(conn)
         if not user:
             self.send_json({"auth": False, "catalog": catalog})
             return
@@ -496,6 +631,12 @@ class AppHandler(BaseHTTPRequestHandler):
                 "occupation": user["occupation"],
                 "gender": user["gender"],
             },
+        }
+
+    def catalog(self, conn: sqlite3.Connection) -> dict:
+        return {
+            "trips": list(TRIPS.values()),
+            "taxonomy": taxonomy_from_db(conn),
         }
 
     def serialize_addresses(self, conn: sqlite3.Connection, user_id: str) -> list[dict]:
@@ -587,7 +728,7 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_json(
             {
                 "auth": True,
-                "catalog": {"trips": list(TRIPS.values()), "taxonomy": TAXONOMY},
+                "catalog": self.catalog(conn),
                 "user": self.serialize_user(user),
                 "addresses": self.serialize_addresses(conn, user["id"]),
                 "orders": self.serialize_orders(conn, user["id"]),
@@ -807,7 +948,7 @@ class AppHandler(BaseHTTPRequestHandler):
             if not isinstance(personality, list) or len(personality) > 3:
                 self.send_json({"error": "性格最多选择 3 个"}, 400)
                 return
-            valid = self.valid_profile(profile, hobby, personality)
+            valid = self.valid_profile(conn, profile, hobby, personality)
             if not valid:
                 self.send_json({"error": "画像选项无效"}, 400)
                 return
@@ -834,9 +975,17 @@ class AppHandler(BaseHTTPRequestHandler):
         updated = conn.execute("SELECT * FROM users WHERE id = ?", (user["id"],)).fetchone()
         self.state_response(conn, updated)
 
-    def valid_profile(self, profile: dict, hobby: list, personality: list) -> bool:
+    def valid_profile(
+        self,
+        conn: sqlite3.Connection,
+        profile: dict,
+        hobby: list,
+        personality: list,
+    ) -> bool:
+        taxonomy = taxonomy_from_db(conn)
+
         def valid_values(group: str, values: list, max_count: int) -> bool:
-            allowed = {item[0] for item in TAXONOMY[group]["options"]}
+            allowed = {item[0] for item in taxonomy[group]["options"]}
             return len(values) <= max_count and len(set(values)) == len(values) and set(values) <= allowed
 
         if not valid_values("hobby", hobby, 5) or not valid_values("personality", personality, 3):
@@ -844,11 +993,11 @@ class AppHandler(BaseHTTPRequestHandler):
         occupation = profile.get("occupation")
         gender = profile.get("gender")
         if occupation:
-            allowed_occupations = {item[0] for item in TAXONOMY["occupation"]["options"]}
+            allowed_occupations = {item[0] for item in taxonomy["occupation"]["options"]}
             if occupation not in allowed_occupations:
                 return False
         if gender:
-            allowed_genders = {item[0] for item in TAXONOMY["gender"]["options"]}
+            allowed_genders = {item[0] for item in taxonomy["gender"]["options"]}
             if gender not in allowed_genders:
                 return False
         return True
@@ -1014,6 +1163,957 @@ class AppHandler(BaseHTTPRequestHandler):
         orders = self.serialize_orders(conn, user["id"])
         order = next(item for item in orders if item["id"] == order_id)
         self.send_json({"ok": True, "order": order}, 201)
+
+    def query_params(self) -> dict[str, list[str]]:
+        return parse_qs(urlsplit(self.path).query, keep_blank_values=True)
+
+    def query_value(self, name: str, default: str = "") -> str:
+        values = self.query_params().get(name)
+        return values[0] if values else default
+
+    def handle_admin_api(
+        self, conn: sqlite3.Connection, method: str, path: str
+    ) -> None:
+        if method == "POST" and path == "/api/admin/login":
+            self.admin_login(conn)
+            return
+        if method == "GET" and path == "/api/admin/me":
+            admin = self.current_admin(conn)
+            if not admin:
+                self.send_json({"error": "管理员未登录"}, 401)
+                return
+            self.send_json(
+                {
+                    "authenticated": True,
+                    "admin": {"username": admin["admin_name"]},
+                    "version": APP_VERSION,
+                }
+            )
+            return
+
+        admin = self.current_admin(conn)
+        if not admin:
+            self.send_json({"error": "管理员登录已失效"}, 401)
+            return
+        admin_name = admin["admin_name"]
+
+        if method == "POST" and path == "/api/admin/logout":
+            self.read_json()
+            cookie = self.clear_admin_session(conn)
+            conn.commit()
+            self.send_json({"ok": True}, headers={"Set-Cookie": cookie})
+            return
+        if method == "GET" and path == "/api/admin/dashboard":
+            self.admin_dashboard(conn)
+            return
+        if path == "/api/admin/users":
+            if method == "GET":
+                self.admin_list_users(conn)
+            elif method == "POST":
+                self.admin_create_user(conn, admin_name)
+            else:
+                self.send_json({"error": "Method not allowed"}, 405)
+            return
+        user_match = re.fullmatch(r"/api/admin/users/([^/]+)", path)
+        if user_match:
+            if method == "GET":
+                self.admin_get_user(conn, user_match.group(1))
+            elif method == "PATCH":
+                self.admin_update_user(conn, admin_name, user_match.group(1))
+            elif method == "DELETE":
+                self.read_json()
+                self.admin_delete_user(conn, admin_name, user_match.group(1))
+            else:
+                self.send_json({"error": "Method not allowed"}, 405)
+            return
+        if path == "/api/admin/tags":
+            if method == "GET":
+                self.admin_list_tags(conn)
+            elif method == "POST":
+                self.admin_create_tag(conn, admin_name)
+            else:
+                self.send_json({"error": "Method not allowed"}, 405)
+            return
+        tag_match = re.fullmatch(r"/api/admin/tags/([^/]+)", path)
+        if tag_match:
+            if method == "PATCH":
+                self.admin_update_tag(conn, admin_name, tag_match.group(1))
+            elif method == "DELETE":
+                self.read_json()
+                self.admin_delete_tag(conn, admin_name, tag_match.group(1))
+            else:
+                self.send_json({"error": "Method not allowed"}, 405)
+            return
+        if method == "GET" and path == "/api/admin/orders":
+            self.admin_list_orders(conn)
+            return
+        order_match = re.fullmatch(r"/api/admin/orders/([^/]+)", path)
+        if method == "GET" and order_match:
+            self.admin_get_order(conn, order_match.group(1))
+            return
+        if method == "GET" and path == "/api/admin/audit":
+            self.admin_list_audit(conn)
+            return
+        self.send_json({"error": "Not found"}, 404)
+
+    def login_is_blocked(self) -> bool:
+        ip = self.client_address[0]
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+        with ADMIN_LOGIN_LOCK:
+            attempts = [
+                value for value in ADMIN_LOGIN_FAILURES.get(ip, []) if value >= cutoff
+            ]
+            ADMIN_LOGIN_FAILURES[ip] = attempts
+            return len(attempts) >= 5
+
+    def record_login_failure(self) -> None:
+        ip = self.client_address[0]
+        with ADMIN_LOGIN_LOCK:
+            ADMIN_LOGIN_FAILURES.setdefault(ip, []).append(datetime.now(timezone.utc))
+
+    def clear_login_failures(self) -> None:
+        with ADMIN_LOGIN_LOCK:
+            ADMIN_LOGIN_FAILURES.pop(self.client_address[0], None)
+
+    def admin_login(self, conn: sqlite3.Connection) -> None:
+        if not ADMIN_PASSWORD:
+            self.send_json({"error": "后台密码未配置，请更新部署环境"}, 503)
+            return
+        if self.login_is_blocked():
+            self.send_json({"error": "登录失败次数过多，请 10 分钟后再试"}, 429)
+            return
+        body = self.read_json()
+        username = str(body.get("username", "")).strip()
+        password = str(body.get("password", ""))
+        valid_username = hmac.compare_digest(username, ADMIN_USERNAME)
+        valid_password = hmac.compare_digest(password, ADMIN_PASSWORD)
+        if not valid_username or not valid_password:
+            self.record_login_failure()
+            self.send_json({"error": "管理员账号或密码错误"}, 401)
+            return
+        self.clear_login_failures()
+        token = secrets.token_urlsafe(36)
+        now = datetime.now(timezone.utc)
+        expires = now + timedelta(hours=ADMIN_SESSION_HOURS)
+        conn.execute(
+            """
+            INSERT INTO admin_sessions(token_hash, admin_name, created_at, expires_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                hash_token(token),
+                ADMIN_USERNAME,
+                now_iso(),
+                expires.replace(microsecond=0).isoformat(),
+            ),
+        )
+        self.audit(
+            conn,
+            ADMIN_USERNAME,
+            "admin.login",
+            "session",
+            None,
+            {"ip": self.client_address[0]},
+        )
+        conn.commit()
+        cookie_parts = [
+            f"goapp_admin_session={token}",
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Strict",
+            f"Max-Age={ADMIN_SESSION_HOURS * 3600}",
+        ]
+        if COOKIE_SECURE:
+            cookie_parts.append("Secure")
+        self.send_json(
+            {
+                "authenticated": True,
+                "admin": {"username": ADMIN_USERNAME},
+                "version": APP_VERSION,
+            },
+            headers={"Set-Cookie": "; ".join(cookie_parts)},
+        )
+
+    def current_admin(self, conn: sqlite3.Connection) -> sqlite3.Row | None:
+        morsel = self.cookies().get("goapp_admin_session")
+        if not morsel:
+            return None
+        return conn.execute(
+            """
+            SELECT * FROM admin_sessions
+            WHERE token_hash = ? AND expires_at > ?
+            """,
+            (hash_token(morsel.value), now_iso()),
+        ).fetchone()
+
+    def clear_admin_session(self, conn: sqlite3.Connection) -> str:
+        morsel = self.cookies().get("goapp_admin_session")
+        if morsel:
+            conn.execute(
+                "DELETE FROM admin_sessions WHERE token_hash = ?",
+                (hash_token(morsel.value),),
+            )
+        parts = [
+            "goapp_admin_session=",
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Strict",
+            "Max-Age=0",
+        ]
+        if COOKIE_SECURE:
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    def audit(
+        self,
+        conn: sqlite3.Connection,
+        admin_name: str,
+        action: str,
+        target_type: str,
+        target_id: str | None,
+        details: dict,
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO admin_audit(
+                id, admin_name, action, target_type, target_id,
+                details_json, ip, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                uuid.uuid4().hex,
+                admin_name,
+                action,
+                target_type,
+                target_id,
+                json.dumps(details, ensure_ascii=False),
+                self.client_address[0],
+                now_iso(),
+            ),
+        )
+
+    def admin_dashboard(self, conn: sqlite3.Connection) -> None:
+        counts = {}
+        for name, sql in {
+            "users": "SELECT COUNT(*) FROM users",
+            "orders": "SELECT COUNT(*) FROM orders",
+            "vouchers": "SELECT COUNT(*) FROM vouchers",
+            "tags": "SELECT COUNT(*) FROM taxonomy_tags",
+            "enabledTags": "SELECT COUNT(*) FROM taxonomy_tags WHERE enabled = 1",
+        }.items():
+            counts[name] = conn.execute(sql).fetchone()[0]
+        revenue = conn.execute("SELECT COALESCE(SUM(total), 0) FROM orders").fetchone()[0]
+        unused = conn.execute(
+            "SELECT COUNT(*) FROM vouchers WHERE status = 'unused'"
+        ).fetchone()[0]
+        used = conn.execute(
+            "SELECT COUNT(*) FROM vouchers WHERE status = 'used'"
+        ).fetchone()[0]
+        week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).replace(
+            microsecond=0
+        ).isoformat()
+        counts["newUsers7d"] = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE created_at >= ?", (week_ago,)
+        ).fetchone()[0]
+        counts["todayOrders"] = conn.execute(
+            "SELECT COUNT(*) FROM orders WHERE substr(created_at, 1, 10) = ?",
+            (today_local().isoformat(),),
+        ).fetchone()[0]
+        recent_orders = self.admin_orders_data(conn, "", "", 1, 6)["items"]
+        recent_users = [
+            self.admin_user_dict(row)
+            for row in conn.execute(
+                """
+                SELECT u.*,
+                    (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) AS order_count,
+                    (SELECT COALESCE(SUM(total), 0) FROM orders o WHERE o.user_id = u.id) AS spend,
+                    (SELECT COUNT(*) FROM addresses a WHERE a.user_id = u.id) AS address_count
+                FROM users u ORDER BY u.created_at DESC LIMIT 5
+                """
+            ).fetchall()
+        ]
+        self.send_json(
+            {
+                "metrics": {
+                    **counts,
+                    "revenue": revenue,
+                    "vouchersUnused": unused,
+                    "vouchersUsed": used,
+                },
+                "recentOrders": recent_orders,
+                "recentUsers": recent_users,
+                "demoMode": DEMO_MODE,
+            }
+        )
+
+    def admin_user_dict(self, row: sqlite3.Row) -> dict:
+        keys = set(row.keys())
+        return {
+            "id": row["id"],
+            "phone": row["phone"],
+            "nickname": row["nickname"],
+            "profile": {
+                "hobby": parse_json(row["hobby_json"], []),
+                "personality": parse_json(row["personality_json"], []),
+                "occupation": row["occupation"],
+                "gender": row["gender"],
+            },
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+            "orderCount": row["order_count"] if "order_count" in keys else None,
+            "spend": row["spend"] if "spend" in keys else None,
+            "addressCount": row["address_count"] if "address_count" in keys else None,
+        }
+
+    def admin_user_query(self) -> str:
+        return """
+            SELECT u.*,
+                (SELECT COUNT(*) FROM orders o WHERE o.user_id = u.id) AS order_count,
+                (SELECT COALESCE(SUM(total), 0) FROM orders o WHERE o.user_id = u.id) AS spend,
+                (SELECT COUNT(*) FROM addresses a WHERE a.user_id = u.id) AS address_count
+            FROM users u
+        """
+
+    def admin_list_users(self, conn: sqlite3.Connection) -> None:
+        q = self.query_value("q").strip()
+        try:
+            page = max(1, int(self.query_value("page", "1")))
+            limit = min(100, max(1, int(self.query_value("limit", "20"))))
+        except ValueError:
+            self.send_json({"error": "分页参数错误"}, 400)
+            return
+        where = ""
+        params = []
+        if q:
+            where = " WHERE u.phone LIKE ? OR u.nickname LIKE ?"
+            params = [f"%{q}%", f"%{q}%"]
+        total = conn.execute(
+            "SELECT COUNT(*) FROM users u" + where, params
+        ).fetchone()[0]
+        rows = conn.execute(
+            self.admin_user_query()
+            + where
+            + " ORDER BY u.created_at DESC LIMIT ? OFFSET ?",
+            [*params, limit, (page - 1) * limit],
+        ).fetchall()
+        self.send_json(
+            {
+                "items": [self.admin_user_dict(row) for row in rows],
+                "total": total,
+                "page": page,
+                "limit": limit,
+            }
+        )
+
+    def normalize_admin_user(
+        self,
+        conn: sqlite3.Connection,
+        body: dict,
+        existing: sqlite3.Row | None = None,
+    ) -> dict | None:
+        phone = str(body.get("phone", existing["phone"] if existing else "")).strip()
+        nickname = str(
+            body.get("nickname", existing["nickname"] if existing else "")
+        ).strip()
+        if not PHONE_RE.fullmatch(phone):
+            self.send_json({"error": "手机号格式错误"}, 400)
+            return None
+        if not 2 <= len(nickname) <= 12:
+            self.send_json({"error": "昵称需 2–12 个字"}, 400)
+            return None
+        old_profile = (
+            {
+                "hobby": parse_json(existing["hobby_json"], []),
+                "personality": parse_json(existing["personality_json"], []),
+                "occupation": existing["occupation"],
+                "gender": existing["gender"],
+            }
+            if existing
+            else {"hobby": [], "personality": [], "occupation": None, "gender": None}
+        )
+        profile = body.get("profile", old_profile)
+        if not isinstance(profile, dict):
+            self.send_json({"error": "画像格式错误"}, 400)
+            return None
+        hobby = profile.get("hobby", old_profile["hobby"]) or []
+        personality = profile.get("personality", old_profile["personality"]) or []
+        occupation = profile.get("occupation", old_profile["occupation"]) or None
+        gender = profile.get("gender", old_profile["gender"]) or None
+        codes = all_tag_codes(conn)
+        if (
+            not isinstance(hobby, list)
+            or len(hobby) > 5
+            or len(set(hobby)) != len(hobby)
+            or not set(hobby) <= codes["hobby"]
+        ):
+            self.send_json({"error": "爱好标签无效"}, 400)
+            return None
+        if (
+            not isinstance(personality, list)
+            or len(personality) > 3
+            or len(set(personality)) != len(personality)
+            or not set(personality) <= codes["personality"]
+        ):
+            self.send_json({"error": "性格标签无效"}, 400)
+            return None
+        if occupation and occupation not in codes["occupation"]:
+            self.send_json({"error": "职业标签无效"}, 400)
+            return None
+        if gender and gender not in codes["gender"]:
+            self.send_json({"error": "性别标签无效"}, 400)
+            return None
+        return {
+            "phone": phone,
+            "nickname": nickname,
+            "hobby": hobby,
+            "personality": personality,
+            "occupation": occupation,
+            "gender": gender,
+        }
+
+    def admin_create_user(self, conn: sqlite3.Connection, admin_name: str) -> None:
+        body = self.read_json()
+        values = self.normalize_admin_user(conn, body)
+        if values is None:
+            return
+        if conn.execute(
+            "SELECT 1 FROM users WHERE phone = ?", (values["phone"],)
+        ).fetchone():
+            self.send_json({"error": "该手机号已存在"}, 409)
+            return
+        user_id = uuid.uuid4().hex
+        now = now_iso()
+        conn.execute(
+            """
+            INSERT INTO users(
+                id, phone, nickname, hobby_json, personality_json,
+                occupation, gender, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                values["phone"],
+                values["nickname"],
+                json.dumps(values["hobby"], ensure_ascii=False),
+                json.dumps(values["personality"], ensure_ascii=False),
+                values["occupation"],
+                values["gender"],
+                now,
+                now,
+            ),
+        )
+        self.audit(
+            conn,
+            admin_name,
+            "user.create",
+            "user",
+            user_id,
+            {"phone": values["phone"], "nickname": values["nickname"]},
+        )
+        conn.commit()
+        row = conn.execute(
+            self.admin_user_query() + " WHERE u.id = ?", (user_id,)
+        ).fetchone()
+        self.send_json({"ok": True, "user": self.admin_user_dict(row)}, 201)
+
+    def admin_get_user(self, conn: sqlite3.Connection, user_id: str) -> None:
+        row = conn.execute(
+            self.admin_user_query() + " WHERE u.id = ?", (user_id,)
+        ).fetchone()
+        if not row:
+            self.send_json({"error": "用户不存在"}, 404)
+            return
+        self.send_json(
+            {
+                "user": self.admin_user_dict(row),
+                "addresses": self.serialize_addresses(conn, user_id),
+                "orders": self.serialize_orders(conn, user_id),
+            }
+        )
+
+    def admin_update_user(
+        self, conn: sqlite3.Connection, admin_name: str, user_id: str
+    ) -> None:
+        existing = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not existing:
+            self.send_json({"error": "用户不存在"}, 404)
+            return
+        body = self.read_json()
+        values = self.normalize_admin_user(conn, body, existing)
+        if values is None:
+            return
+        conflict = conn.execute(
+            "SELECT 1 FROM users WHERE phone = ? AND id <> ?",
+            (values["phone"], user_id),
+        ).fetchone()
+        if conflict:
+            self.send_json({"error": "该手机号已被其他用户使用"}, 409)
+            return
+        conn.execute(
+            """
+            UPDATE users SET phone = ?, nickname = ?, hobby_json = ?,
+                personality_json = ?, occupation = ?, gender = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                values["phone"],
+                values["nickname"],
+                json.dumps(values["hobby"], ensure_ascii=False),
+                json.dumps(values["personality"], ensure_ascii=False),
+                values["occupation"],
+                values["gender"],
+                now_iso(),
+                user_id,
+            ),
+        )
+        self.audit(
+            conn,
+            admin_name,
+            "user.update",
+            "user",
+            user_id,
+            {"phone": values["phone"], "nickname": values["nickname"]},
+        )
+        conn.commit()
+        row = conn.execute(
+            self.admin_user_query() + " WHERE u.id = ?", (user_id,)
+        ).fetchone()
+        self.send_json({"ok": True, "user": self.admin_user_dict(row)})
+
+    def admin_delete_user(
+        self, conn: sqlite3.Connection, admin_name: str, user_id: str
+    ) -> None:
+        row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row:
+            self.send_json({"error": "用户不存在"}, 404)
+            return
+        order_count = conn.execute(
+            "SELECT COUNT(*) FROM orders WHERE user_id = ?", (user_id,)
+        ).fetchone()[0]
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        self.audit(
+            conn,
+            admin_name,
+            "user.delete",
+            "user",
+            user_id,
+            {"phone": row["phone"], "nickname": row["nickname"], "orders": order_count},
+        )
+        conn.commit()
+        self.send_json({"ok": True})
+
+    def admin_list_tags(self, conn: sqlite3.Connection) -> None:
+        group_name = self.query_value("group").strip()
+        q = self.query_value("q").strip()
+        clauses = []
+        params = []
+        if group_name:
+            clauses.append("group_name = ?")
+            params.append(group_name)
+        if q:
+            clauses.append("(code LIKE ? OR label LIKE ?)")
+            params.extend([f"%{q}%", f"%{q}%"])
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = conn.execute(
+            """
+            SELECT * FROM taxonomy_tags
+            """
+            + where
+            + " ORDER BY CASE group_name WHEN 'hobby' THEN 1 WHEN 'personality' THEN 2 "
+            "WHEN 'occupation' THEN 3 ELSE 4 END, sort_order, label",
+            params,
+        ).fetchall()
+        usage = tag_usage_map(conn)
+        items = [
+            {
+                "id": row["id"],
+                "group": row["group_name"],
+                "code": row["code"],
+                "label": row["label"],
+                "enabled": bool(row["enabled"]),
+                "sortOrder": row["sort_order"],
+                "usage": usage.get((row["group_name"], row["code"]), 0),
+                "createdAt": row["created_at"],
+                "updatedAt": row["updated_at"],
+            }
+            for row in rows
+        ]
+        self.send_json({"items": items, "groups": TAXONOMY})
+
+    def validate_tag_fields(
+        self, body: dict, existing: sqlite3.Row | None = None
+    ) -> dict | None:
+        group_name = str(body.get("group", existing["group_name"] if existing else ""))
+        code = str(body.get("code", existing["code"] if existing else "")).strip()
+        label = str(body.get("label", existing["label"] if existing else "")).strip()
+        enabled = body.get("enabled", bool(existing["enabled"]) if existing else True)
+        try:
+            sort_order = int(
+                body.get("sortOrder", existing["sort_order"] if existing else 0)
+            )
+        except (TypeError, ValueError):
+            self.send_json({"error": "排序值必须是整数"}, 400)
+            return None
+        if group_name not in TAG_GROUPS:
+            self.send_json({"error": "标签分组无效"}, 400)
+            return None
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", code):
+            self.send_json({"error": "标签代码需为小写字母、数字、_ 或 -"}, 400)
+            return None
+        if not 1 <= len(label) <= 16:
+            self.send_json({"error": "标签名称需为 1–16 个字"}, 400)
+            return None
+        if not 0 <= sort_order <= 9999:
+            self.send_json({"error": "排序值需在 0–9999"}, 400)
+            return None
+        return {
+            "group": group_name,
+            "code": code,
+            "label": label,
+            "enabled": bool(enabled),
+            "sortOrder": sort_order,
+        }
+
+    def admin_create_tag(self, conn: sqlite3.Connection, admin_name: str) -> None:
+        body = self.read_json()
+        values = self.validate_tag_fields(body)
+        if values is None:
+            return
+        if conn.execute(
+            "SELECT 1 FROM taxonomy_tags WHERE group_name = ? AND code = ?",
+            (values["group"], values["code"]),
+        ).fetchone():
+            self.send_json({"error": "该分组下标签代码已存在"}, 409)
+            return
+        tag_id = uuid.uuid4().hex
+        now = now_iso()
+        conn.execute(
+            """
+            INSERT INTO taxonomy_tags(
+                id, group_name, code, label, enabled, sort_order, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                tag_id,
+                values["group"],
+                values["code"],
+                values["label"],
+                1 if values["enabled"] else 0,
+                values["sortOrder"],
+                now,
+                now,
+            ),
+        )
+        self.audit(
+            conn,
+            admin_name,
+            "tag.create",
+            "tag",
+            tag_id,
+            values,
+        )
+        conn.commit()
+        self.send_json({"ok": True, "id": tag_id, "tag": values}, 201)
+
+    def admin_update_tag(
+        self, conn: sqlite3.Connection, admin_name: str, tag_id: str
+    ) -> None:
+        existing = conn.execute(
+            "SELECT * FROM taxonomy_tags WHERE id = ?", (tag_id,)
+        ).fetchone()
+        if not existing:
+            self.send_json({"error": "标签不存在"}, 404)
+            return
+        values = self.validate_tag_fields(self.read_json(), existing)
+        if values is None:
+            return
+        usage = tag_usage_map(conn).get((existing["group_name"], existing["code"]), 0)
+        if (
+            usage
+            and (
+                values["group"] != existing["group_name"]
+                or values["code"] != existing["code"]
+            )
+        ):
+            self.send_json({"error": "已被使用的标签不能修改分组或代码"}, 409)
+            return
+        if values["group"] != existing["group_name"] or values["code"] != existing["code"]:
+            conflict = conn.execute(
+                """
+                SELECT 1 FROM taxonomy_tags
+                WHERE group_name = ? AND code = ? AND id <> ?
+                """,
+                (values["group"], values["code"], tag_id),
+            ).fetchone()
+            if conflict:
+                self.send_json({"error": "该分组下标签代码已存在"}, 409)
+                return
+        conn.execute(
+            """
+            UPDATE taxonomy_tags SET group_name = ?, code = ?, label = ?,
+                enabled = ?, sort_order = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                values["group"],
+                values["code"],
+                values["label"],
+                1 if values["enabled"] else 0,
+                values["sortOrder"],
+                now_iso(),
+                tag_id,
+            ),
+        )
+        self.audit(
+            conn,
+            admin_name,
+            "tag.update",
+            "tag",
+            tag_id,
+            {"before": {"group": existing["group_name"], "code": existing["code"]}, **values},
+        )
+        conn.commit()
+        self.send_json({"ok": True, "tag": values})
+
+    def admin_delete_tag(
+        self, conn: sqlite3.Connection, admin_name: str, tag_id: str
+    ) -> None:
+        existing = conn.execute(
+            "SELECT * FROM taxonomy_tags WHERE id = ?", (tag_id,)
+        ).fetchone()
+        if not existing:
+            self.send_json({"error": "标签不存在"}, 404)
+            return
+        group_name = existing["group_name"]
+        code = existing["code"]
+        usage = tag_usage_map(conn).get((group_name, code), 0)
+        force = self.query_value("force") == "1"
+        if usage and not force:
+            self.send_json(
+                {
+                    "error": f"该标签正被 {usage} 位用户使用，确认后会从用户画像中移除",
+                    "code": "TAG_IN_USE",
+                    "usage": usage,
+                },
+                409,
+            )
+            return
+        if usage:
+            for user in conn.execute("SELECT * FROM users").fetchall():
+                hobby = [
+                    value
+                    for value in parse_json(user["hobby_json"], [])
+                    if not (group_name == "hobby" and value == code)
+                ]
+                personality = [
+                    value
+                    for value in parse_json(user["personality_json"], [])
+                    if not (group_name == "personality" and value == code)
+                ]
+                occupation = (
+                    None
+                    if group_name == "occupation" and user["occupation"] == code
+                    else user["occupation"]
+                )
+                gender = (
+                    None
+                    if group_name == "gender" and user["gender"] == code
+                    else user["gender"]
+                )
+                conn.execute(
+                    """
+                    UPDATE users SET hobby_json = ?, personality_json = ?,
+                        occupation = ?, gender = ?, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        json.dumps(hobby),
+                        json.dumps(personality),
+                        occupation,
+                        gender,
+                        now_iso(),
+                        user["id"],
+                    ),
+                )
+        conn.execute("DELETE FROM taxonomy_tags WHERE id = ?", (tag_id,))
+        self.audit(
+            conn,
+            admin_name,
+            "tag.delete",
+            "tag",
+            tag_id,
+            {"group": group_name, "code": code, "label": existing["label"], "usage": usage},
+        )
+        conn.commit()
+        self.send_json({"ok": True, "removedFromUsers": usage})
+
+    def admin_orders_data(
+        self,
+        conn: sqlite3.Connection,
+        q: str,
+        status_filter: str,
+        page: int,
+        limit: int,
+    ) -> dict:
+        where = ""
+        params = []
+        if q:
+            where = """
+                WHERE o.order_no LIKE ? OR o.trip_title LIKE ?
+                    OR u.phone LIKE ? OR u.nickname LIKE ?
+            """
+            params = [f"%{q}%"] * 4
+        rows = conn.execute(
+            """
+            SELECT o.*, u.phone, u.nickname
+            FROM orders o JOIN users u ON u.id = o.user_id
+            """
+            + where
+            + " ORDER BY o.created_at DESC",
+            params,
+        ).fetchall()
+        items = []
+        for row in rows:
+            vouchers = conn.execute(
+                "SELECT * FROM vouchers WHERE order_id = ? ORDER BY seq",
+                (row["id"],),
+            ).fetchall()
+            status = self.order_status(row, vouchers)
+            if status_filter and status != status_filter:
+                continue
+            items.append(
+                {
+                    "id": row["id"],
+                    "no": row["order_no"],
+                    "status": status,
+                    "createdAt": row["created_at"],
+                    "travelDate": row["travel_date"],
+                    "people": row["people"],
+                    "title": row["trip_title"],
+                    "total": row["total"],
+                    "perPerson": row["per_person"],
+                    "channel": row["channel"],
+                    "user": {
+                        "id": row["user_id"],
+                        "phone": row["phone"],
+                        "nickname": row["nickname"],
+                    },
+                    "voucherCount": len(vouchers),
+                    "vouchersUsed": sum(
+                        1 for voucher in vouchers if voucher["status"] == "used"
+                    ),
+                }
+            )
+        total = len(items)
+        offset = (page - 1) * limit
+        return {
+            "items": items[offset : offset + limit],
+            "total": total,
+            "page": page,
+            "limit": limit,
+        }
+
+    def admin_list_orders(self, conn: sqlite3.Connection) -> None:
+        try:
+            page = max(1, int(self.query_value("page", "1")))
+            limit = min(100, max(1, int(self.query_value("limit", "20"))))
+        except ValueError:
+            self.send_json({"error": "分页参数错误"}, 400)
+            return
+        self.send_json(
+            self.admin_orders_data(
+                conn,
+                self.query_value("q").strip(),
+                self.query_value("status").strip(),
+                page,
+                limit,
+            )
+        )
+
+    def admin_get_order(self, conn: sqlite3.Connection, order_id: str) -> None:
+        row = conn.execute(
+            """
+            SELECT o.*, u.phone, u.nickname
+            FROM orders o JOIN users u ON u.id = o.user_id
+            WHERE o.id = ?
+            """,
+            (order_id,),
+        ).fetchone()
+        if not row:
+            self.send_json({"error": "订单不存在"}, 404)
+            return
+        vouchers = conn.execute(
+            "SELECT * FROM vouchers WHERE order_id = ? ORDER BY seq", (order_id,)
+        ).fetchall()
+        self.send_json(
+            {
+                "order": {
+                    "id": row["id"],
+                    "no": row["order_no"],
+                    "status": self.order_status(row, vouchers),
+                    "createdAt": row["created_at"],
+                    "travelDate": row["travel_date"],
+                    "people": row["people"],
+                    "title": row["trip_title"],
+                    "total": row["total"],
+                    "perPerson": row["per_person"],
+                    "address": parse_json(row["address_json"], None),
+                    "channel": row["channel"],
+                    "user": {
+                        "id": row["user_id"],
+                        "phone": row["phone"],
+                        "nickname": row["nickname"],
+                    },
+                },
+                "vouchers": [
+                    {
+                        "id": voucher["id"],
+                        "seq": voucher["seq"],
+                        "name": voucher["name"],
+                        "code": voucher["code"],
+                        "redeem": voucher["redeem_code"],
+                        "status": voucher["status"],
+                        "usedAt": voucher["used_at"],
+                    }
+                    for voucher in vouchers
+                ],
+            }
+        )
+
+    def admin_list_audit(self, conn: sqlite3.Connection) -> None:
+        try:
+            page = max(1, int(self.query_value("page", "1")))
+            limit = min(100, max(1, int(self.query_value("limit", "30"))))
+        except ValueError:
+            self.send_json({"error": "分页参数错误"}, 400)
+            return
+        total = conn.execute("SELECT COUNT(*) FROM admin_audit").fetchone()[0]
+        rows = conn.execute(
+            """
+            SELECT * FROM admin_audit ORDER BY created_at DESC LIMIT ? OFFSET ?
+            """,
+            (limit, (page - 1) * limit),
+        ).fetchall()
+        self.send_json(
+            {
+                "items": [
+                    {
+                        "id": row["id"],
+                        "admin": row["admin_name"],
+                        "action": row["action"],
+                        "targetType": row["target_type"],
+                        "targetId": row["target_id"],
+                        "details": parse_json(row["details_json"], {}),
+                        "ip": row["ip"],
+                        "createdAt": row["created_at"],
+                    }
+                    for row in rows
+                ],
+                "total": total,
+                "page": page,
+                "limit": limit,
+            }
+        )
 
     def send_voucher_qr(self, conn: sqlite3.Connection, voucher_id: str) -> None:
         user = self.require_user(conn)

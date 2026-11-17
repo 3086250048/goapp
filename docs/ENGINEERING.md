@@ -32,6 +32,8 @@
 | 一键部署 / 更新 | `./deploy/deploy.sh --remote user@host --domain trip.example.com` |
 | 部署配置自检 | `./tools/check-deploy.sh` |
 | 构建 Android APK | `APP_URL=https://trip.example.com/ ./android/build-apk.sh` |
+| 管理后台 API 回归 | `ADMIN_PASSWORD=... python3 tools/admin-api-smoke.py` |
+| 管理后台浏览器回归 | `ADMIN_PASSWORD=... node tools/admin-smoke.js` |
 
 两点注意：
 
@@ -49,6 +51,11 @@ prototype/              前端 PWA
 ├── sw.js               离线缓存，网络优先
 ├── manifest.webmanifest
 └── icons/              192/512/maskable/apple-touch
+
+admin/
+├── index.html          管理后台登录与主布局
+├── admin.css           后台桌面/移动端样式
+└── admin.js            仪表盘、用户、标签、订单与审计页面
 
 server/
 ├── app.py              API、SQLite、会话、订单、真实二维码
@@ -76,6 +83,9 @@ Android 包使用 `aapt2 + javac + dx + apksigner` 构建，不依赖 Gradle。A
 | `addresses` | 每用户最多 5 条地址，恰好一条默认地址 |
 | `orders` | 目的地、出行日期、人数、服务端结算金额、地址快照 |
 | `vouchers` | 每站一张，独立二维码内容与 8 位核销码 |
+| `taxonomy_tags` | 四类可配置标签；启用状态与排序直接影响用户端画像页 |
+| `admin_sessions` | 管理员独立 12 小时会话，只保存 token 哈希 |
+| `admin_audit` | 管理员登录及用户/标签写操作审计 |
 
 订单表不保存独立的“部分核销”字段。读取时按凭证状态和出行日期聚合为 `paid / partially_used / completed / expired`。
 
@@ -94,6 +104,15 @@ Android 包使用 `aapt2 + javac + dx + apksigner` 构建，不依赖 Gradle。A
 | `POST` | `/api/addresses` | 新增地址 |
 | `POST` | `/api/orders` | 服务端复核并创建订单与逐站凭证 |
 | `GET` | `/api/vouchers/:id/qr.svg` | 当前用户有权限的真实二维码 |
+| `POST` | `/api/admin/login` | 管理员登录，独立 HttpOnly Cookie |
+| `GET` | `/api/admin/dashboard` | 后台统计与最近订单/用户 |
+| `GET/POST` | `/api/admin/users` | 用户分页搜索与新增 |
+| `GET/PATCH/DELETE` | `/api/admin/users/:id` | 用户详情、修改与级联删除 |
+| `GET/POST` | `/api/admin/tags` | 标签列表与新增 |
+| `PATCH/DELETE` | `/api/admin/tags/:id` | 标签修改、启停和删除；被引用时需 `force=1` |
+| `GET` | `/api/admin/orders` | 订单分页、搜索与状态筛选 |
+| `GET` | `/api/admin/orders/:id` | 订单详情与逐站凭证 |
+| `GET` | `/api/admin/audit` | 操作审计分页 |
 
 ## 代码地图（prototype/app.js）
 

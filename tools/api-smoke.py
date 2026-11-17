@@ -41,7 +41,9 @@ def main() -> None:
 
     status, content_type, body = request("/")
     assert status == 200 and "text/html" in content_type
-    assert b"v2.0.0" in body or b"app.js" in body
+    assert b"app.js" in body
+    status, _, app_body = request("/app.js")
+    assert status == 200 and b"APP_VER = '2.1.0'" in app_body
     print("✓ static PWA")
 
     state = json_request("/api/auth/demo", "POST", {})

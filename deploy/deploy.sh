@@ -14,6 +14,12 @@ DOMAIN="${DOMAIN:-}"
 APP_PORT="${APP_PORT:-18080}"
 DEMO_MODE="${DEMO_MODE:-1}"
 DEMO_OTP="${DEMO_OTP:-123456}"
+ADMIN_USERNAME="${ADMIN_USERNAME:-}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+ADMIN_USER_EXPLICIT=0
+ADMIN_PASSWORD_EXPLICIT=0
+[[ -n "$ADMIN_USERNAME" ]] && ADMIN_USER_EXPLICIT=1
+[[ -n "$ADMIN_PASSWORD" ]] && ADMIN_PASSWORD_EXPLICIT=1
 REPO_URL="${REPO_URL:-$DEFAULT_REPO_URL}"
 RESTORE_FILE="${RESTORE_FILE:-}"
 SKIP_PULL=0
@@ -46,6 +52,8 @@ usage() {
   --restore-file PATH  部署时导入 SQLite 备份（可选）
   --demo-mode 0|1      是否开启体验账号与固定验证码，默认 1
   --demo-otp CODE      体验验证码，默认 123456
+  --admin-user USER    后台管理员账号，默认 admin
+  --admin-password PW  后台管理员密码，仅支持字母数字和 ._~!@%^+=-
   --skip-pull          本次不更新 Git，适合服务器上离线重跑
   -h, --help           显示帮助
 
@@ -69,6 +77,8 @@ while (($#)); do
     --restore-file) RESTORE_FILE="${2:-}"; shift 2 ;;
     --demo-mode) DEMO_MODE="${2:-}"; shift 2 ;;
     --demo-otp) DEMO_OTP="${2:-}"; shift 2 ;;
+    --admin-user) ADMIN_USERNAME="${2:-}"; ADMIN_USER_EXPLICIT=1; shift 2 ;;
+    --admin-password) ADMIN_PASSWORD="${2:-}"; ADMIN_PASSWORD_EXPLICIT=1; shift 2 ;;
     --skip-pull) SKIP_PULL=1; shift ;;
     --bootstrap) BOOTSTRAP=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -82,6 +92,10 @@ done
   || fail "应用端口无效：$APP_PORT"
 [[ "$DEMO_MODE" == "0" || "$DEMO_MODE" == "1" ]] || fail "demo-mode 只能是 0 或 1"
 [[ "$DEMO_OTP" =~ ^[0-9]{6}$ ]] || fail "demo-otp 必须是 6 位数字"
+[[ "$ADMIN_USERNAME" =~ ^[A-Za-z0-9._-]{3,64}$ || -z "$ADMIN_USERNAME" ]] \
+  || fail "admin-user 需为 3–64 位字母、数字、. _ 或 -"
+[[ "$ADMIN_PASSWORD" =~ ^[A-Za-z0-9._~!@%^+=-]{8,128}$ || -z "$ADMIN_PASSWORD" ]] \
+  || fail "admin-password 不符合允许的字符规则"
 [[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || fail "分支名无效：$BRANCH"
 [[ "$APP_DIR" == /* && "$APP_DIR" != "/" ]] || fail "app-dir 必须是非根目录的绝对路径"
 if [[ -n "$DOMAIN" && ! "$DOMAIN" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}$ ]]; then
@@ -104,6 +118,8 @@ if [[ -n "$REMOTE" ]]; then
     --demo-mode "$DEMO_MODE"
     --demo-otp "$DEMO_OTP"
   )
+  ((ADMIN_USER_EXPLICIT)) && remote_args+=(--admin-user "$ADMIN_USERNAME")
+  ((ADMIN_PASSWORD_EXPLICIT)) && remote_args+=(--admin-password "$ADMIN_PASSWORD")
   [[ -n "$DOMAIN" ]] && remote_args+=(--domain "$DOMAIN")
   ((SKIP_PULL)) && remote_args+=(--skip-pull)
   remote_restore=""
@@ -146,11 +162,11 @@ fi
 run_root() { "${SUDO[@]}" "$@"; }
 
 install_base_packages() {
-  have curl && have git && return
+  have curl && have git && have openssl && return
   have apt-get || fail "自动安装仅支持 Debian/Ubuntu；请先安装 curl 与 git"
   log "安装基础依赖"
   run_root apt-get update
-  run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git
+  run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git openssl
 }
 
 install_docker() {
@@ -206,6 +222,8 @@ if ((BOOTSTRAP)); then
     --demo-otp "$DEMO_OTP"
     --skip-pull
   )
+  ((ADMIN_USER_EXPLICIT)) && args+=(--admin-user "$ADMIN_USERNAME")
+  ((ADMIN_PASSWORD_EXPLICIT)) && args+=(--admin-password "$ADMIN_PASSWORD")
   [[ -n "$DOMAIN" ]] && args+=(--domain "$DOMAIN")
   [[ -n "$RESTORE_FILE" ]] && args+=(--restore-file "$RESTORE_FILE")
   log "切换到最新部署脚本"
@@ -233,12 +251,31 @@ ensure_server_dependencies
 cd "$REPO_ROOT"
 
 ENV_FILE="$REPO_ROOT/.env"
+env_value() {
+  [[ -f "$ENV_FILE" ]] || return 0
+  sed -n "s/^$1=//p" "$ENV_FILE" | tail -1
+}
+if ((!ADMIN_USER_EXPLICIT)); then
+  ADMIN_USERNAME=$(env_value ADMIN_USERNAME)
+  ADMIN_USERNAME="${ADMIN_USERNAME:-admin}"
+fi
+if ((!ADMIN_PASSWORD_EXPLICIT)); then
+  ADMIN_PASSWORD=$(env_value ADMIN_PASSWORD)
+fi
+if [[ -z "$ADMIN_PASSWORD" ]]; then
+  ADMIN_PASSWORD=$(openssl rand -hex 18)
+  ADMIN_PASSWORD_GENERATED=1
+else
+  ADMIN_PASSWORD_GENERATED=0
+fi
 umask 077
 {
   printf 'COMPOSE_PROJECT_NAME=goapp\n'
   printf 'APP_PORT=%s\n' "$APP_PORT"
   printf 'DEMO_MODE=%s\n' "$DEMO_MODE"
   printf 'DEMO_OTP=%s\n' "$DEMO_OTP"
+  printf 'ADMIN_USERNAME=%s\n' "$ADMIN_USERNAME"
+  printf 'ADMIN_PASSWORD=%s\n' "$ADMIN_PASSWORD"
   printf 'CADDY_IMAGE=%s\n' "${CADDY_IMAGE:-caddy:2.10-alpine}"
   if [[ -n "$DOMAIN" ]]; then
     printf 'DOMAIN=%s\n' "$DOMAIN"
@@ -340,5 +377,9 @@ printf '\n部署信息\n'
 printf '  代码目录  %s\n' "$REPO_ROOT"
 printf '  环境文件  %s\n' "$ENV_FILE"
 printf '  数据卷    goapp_goapp-data\n'
+printf '  管理后台  /admin/（账号 %s）\n' "$ADMIN_USERNAME"
+if ((ADMIN_PASSWORD_GENERATED)); then
+  printf '  后台密码  已生成，保存在 %s 的 ADMIN_PASSWORD\n' "$ENV_FILE"
+fi
 printf '  更新命令  重复执行本次部署命令即可\n'
 printf '  查看日志  docker compose logs -f goapp\n'

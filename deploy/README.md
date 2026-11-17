@@ -29,7 +29,8 @@
 2. 拉取 `master` 到 `/opt/goapp`，重复执行时执行 `git pull --ff-only`。
 3. 生成服务器本地的 `.env`，构建并启动应用与 SQLite 数据卷。
 4. 带域名时启动 Caddy `https` profile，自动申请并续期 HTTPS 证书。
-5. 等待 `/api/health`，并验证公网 `https://域名/api/health`。
+5. 生成或保留管理员凭据，后台入口为 `/admin/`。
+6. 等待 `/api/health`，并验证公网 `https://域名/api/health`。
 
 Windows 可在 WSL 中执行同一命令，或在 PowerShell 中运行：
 
@@ -48,7 +49,7 @@ sudo ./deploy/deploy.sh --domain trip.example.com
 首次部署完成后检查：
 
 ```json
-{"ok":true,"database":"sqlite","version":"2.0.1"}
+{"ok":true,"database":"sqlite","version":"2.1.0"}
 ```
 
 ## 2. 环境变量
@@ -60,10 +61,27 @@ sudo ./deploy/deploy.sh --domain trip.example.com
 | `DATA_DIR` | `/data` | 容器内数据库目录 |
 | `DEMO_MODE` | `1` | 开启体验账号与固定体验验证码；生产接入短信后必须关闭 |
 | `DEMO_OTP` | `123456` | 体验验证码 |
+| `ADMIN_USERNAME` | `admin` | 管理后台账号 |
+| `ADMIN_PASSWORD` | 自动生成 | 管理后台密码；首次生成后重复部署会保留 |
 | `COOKIE_SECURE` | `0` | 正式 HTTPS 部署设为 `1` |
 | `CADDY_IMAGE` | `caddy:2.10-alpine` | 可替换为内网镜像仓库地址 |
 
 脚本每次部署都会根据命令行参数重建项目根目录的 `.env`。`.env` 已加入 `.gitignore`，不能提交。
+
+显式指定管理员凭据：
+
+```bash
+./deploy/deploy.sh --remote root@203.0.113.10 \
+  --domain trip.example.com \
+  --admin-user admin \
+  --admin-password 'replace-with-a-strong-password'
+```
+
+不传参数时，首次部署会生成随机密码，可通过以下命令读取：
+
+```bash
+grep '^ADMIN_' .env
+```
 
 生产环境示例：
 

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#FF6B2C">
+  <title>出行 · 管理后台</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <section class="login-shell" id="loginView">
+    <div class="login-brand">
+      <div class="brand-mark">🧭</div>
+      <p class="eyebrow">GOAPP ADMIN</p>
+      <h1>把每一次决定，<br>看得更清楚。</h1>
+      <p>管理用户、标签与订单。所有修改都会留下操作记录。</p>
+      <div class="login-features">
+        <span>用户管理</span><span>标签投放</span><span>订单查询</span><span>操作审计</span>
+      </div>
+    </div>
+    <form class="login-card" id="loginForm">
+      <p class="eyebrow">管理员登录</p>
+      <h2>进入后台</h2>
+      <label>账号<input id="loginUser" autocomplete="username" value="admin" required></label>
+      <label>密码<input id="loginPassword" type="password" autocomplete="current-password" required></label>
+      <p class="form-error" id="loginError"></p>
+      <button class="primary" type="submit">登录管理后台</button>
+      <small>管理会话 12 小时，连续失败 5 次将锁定 10 分钟。</small>
+    </form>
+  </section>
+
+  <div class="admin-shell" id="appView" hidden>
+    <aside class="sidebar">
+      <div class="side-brand"><span>🧭</span><div><b>出行</b><small>管理后台</small></div></div>
+      <nav id="mainNav">
+        <button class="nav-item active" data-view="dashboard"><span>▦</span>数据概览</button>
+        <button class="nav-item" data-view="users"><span>◉</span>用户管理</button>
+        <button class="nav-item" data-view="tags"><span>◇</span>标签管理</button>
+        <button class="nav-item" data-view="orders"><span>▤</span>订单查询</button>
+        <button class="nav-item" data-view="audit"><span>◷</span>操作日志</button>
+      </nav>
+      <div class="side-foot">
+        <span class="status-dot"></span>
+        <div><b id="adminName">admin</b><small>管理员</small></div>
+        <button id="logoutBtn" title="退出登录">↪</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow" id="pageEyebrow">OVERVIEW</p>
+          <h1 id="pageTitle">数据概览</h1>
+        </div>
+        <div class="top-actions">
+          <span class="env-pill" id="envPill">线上环境</span>
+          <button class="icon-btn" id="refreshBtn" title="刷新">↻</button>
+        </div>
+      </header>
+      <section id="view" class="view"></section>
+    </main>
+  </div>
+
+  <div class="modal-root" id="modalRoot" hidden></div>
+  <div class="toast" id="toast"></div>
+  <script src="admin.js"></script>
+</body>
+</html>
