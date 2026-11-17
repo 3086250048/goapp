@@ -14,9 +14,17 @@
 # 没有 origin 就跳过（纯本地仓库 / 还没加远端）
 git remote get-url origin >/dev/null 2>&1 || exit 0
 
-# 钩子里不能有任何交互式提示，否则会卡住提交
+# 钩子里不能有任何交互式提示，否则会卡住提交。
+# 保留仓库配置的 core.sshCommand，避免覆盖服务器/CI 使用的 SSH key。
 export GIT_TERMINAL_PROMPT=0
-export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=10}"
+if [ -z "${GIT_SSH_COMMAND:-}" ]; then
+  configured_ssh=$(git config --get core.sshCommand || true)
+  if [ -n "$configured_ssh" ]; then
+    export GIT_SSH_COMMAND="$configured_ssh -o BatchMode=yes -o ConnectTimeout=10"
+  else
+    export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=10"
+  fi
+fi
 
 branch=$(git rev-parse --abbrev-ref HEAD)
 [ "$branch" = "HEAD" ] && exit 0
