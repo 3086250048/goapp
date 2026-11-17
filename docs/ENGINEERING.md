@@ -31,6 +31,7 @@
 | 重生成服务端种子 | `node tools/export-seed.js` |
 | 一键部署 / 更新 | `./deploy/deploy.sh --remote user@host --domain trip.example.com` |
 | 部署配置自检 | `./tools/check-deploy.sh` |
+| 构建 Android APK | `APP_URL=https://trip.example.com/ ./android/build-apk.sh` |
 
 两点注意：
 
@@ -58,8 +59,11 @@ deploy/                 一键部署脚本、Caddy 配置与运维手册
 tools/                  自检 / HTTP 探针 / 回归 / 图标 / 种子导出
 Dockerfile              生产镜像
 compose.yaml            单机编排与持久化数据卷
+android/                原生 WebView 壳、资源、Manifest 与无 Gradle APK 构建脚本
 docs/                   文档
 ```
+
+Android 包使用 `aapt2 + javac + dx + apksigner` 构建，不依赖 Gradle。APK 与本地签名密钥分别写入 `dist/`、`.android-keys/`，两者都不入库。签名密钥一旦用于发布必须长期保留，否则新包无法覆盖安装。
 
 ## 服务端数据模型
 

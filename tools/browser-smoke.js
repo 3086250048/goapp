@@ -6,11 +6,12 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const CDP = process.env.CDP_URL || 'http://127.0.0.1:9222';
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:18080/';
+const START_PATH = process.env.START_PATH || '?demo=1#/home';
 const OUT = process.env.SHOT_DIR || path.join(process.env.TMPDIR || '/tmp', 'goapp-shots');
 
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
-  const pageUrl = `${BASE}?demo=1#/home`;
+  const pageUrl = `${BASE}${START_PATH}`;
   const target = await (await fetch(`${CDP}/json/new?${encodeURIComponent(pageUrl)}`, {
     method: 'PUT'
   })).json();
@@ -76,10 +77,14 @@ async function main() {
     cards: document.querySelectorAll('.card').length,
     title: document.title,
     fatal: !!document.querySelector('#__fatal'),
-    error: !!document.querySelector('#__err')
+    error: !!document.querySelector('#__err'),
+    nativeStatusHidden: getComputedStyle(document.querySelector('.statusbar')).display === 'none'
   })`);
-  if (home.version !== '2.0.0' || home.cards < 8 || home.fatal || home.error) {
+  if (home.version !== '2.0.1' || home.cards < 8 || home.fatal || home.error) {
     throw new Error(`首页未就绪: ${JSON.stringify(home)}`);
+  }
+  if (process.env.NATIVE_MODE === '1' && !home.nativeStatusHidden) {
+    throw new Error('原生模式未隐藏网页演示状态栏');
   }
   await screenshot('deployed-home.png');
   console.log(`✓ 首页 ${home.cards} 张卡片 · v${home.version}`);

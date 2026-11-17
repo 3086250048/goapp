@@ -240,7 +240,7 @@ def iso_or_blank(value: datetime | None) -> str | None:
 
 
 class AppHandler(BaseHTTPRequestHandler):
-    server_version = "Goapp/2.0"
+    server_version = "Goapp/2.0.1"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args) -> None:
@@ -421,7 +421,7 @@ class AppHandler(BaseHTTPRequestHandler):
         conn = db()
         try:
             if method == "GET" and path == "/api/health":
-                self.send_json({"ok": True, "database": "sqlite", "version": "2.0.0"})
+                self.send_json({"ok": True, "database": "sqlite", "version": "2.0.1"})
                 return
             if method == "GET" and path == "/api/bootstrap":
                 self.get_bootstrap(conn)

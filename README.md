@@ -105,6 +105,7 @@ Dockerfile          单容器生产镜像
 compose.yaml        本地/单机部署编排与数据卷
 deploy/deploy.sh    一键部署、更新与 HTTPS 验收入口
 deploy/deploy.ps1   Windows / WSL 入口
+android/            原生 Android WebView 壳与 APK 构建脚本
 ```
 
 ## 部署
@@ -125,6 +126,14 @@ sudo ./deploy/deploy.sh
 ```
 
 域名、HTTPS、反向代理、数据备份和生产环境变量见 [deploy/README.md](deploy/README.md)。
+
+## Android APK
+
+```bash
+APP_URL=https://你的域名/ ./android/build-apk.sh
+```
+
+不传 `APP_URL` 时优先读取 `.env` 的 `DOMAIN`。产物为 `dist/goapp-v<版本>.apk`，最低支持 Android 6.0，需要联网访问后端。
 
 ## 自检
 

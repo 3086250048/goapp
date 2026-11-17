@@ -557,3 +557,7 @@ img{display:block;max-width:100%}
 @media (max-width:560px){
   .screen{padding-bottom:env(safe-area-inset-bottom)}
 }
+
+/* 原生 APK：系统状态栏由 Android 绘制，不再显示网页里的演示状态栏 */
+html.native-app .statusbar{display:none}
+html.native-app .screen{padding-top:0}
