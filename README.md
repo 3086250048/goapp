@@ -1,53 +1,59 @@
-# 出行 App · 交互原型
+# 出行 App · 可部署 MVP
 
 面向个人 / 小团体（1–6 人）的出行规划 App —— 像刷外卖一样刷行程方案，一键下单。
-本目录是**可点击的移动端高保真原型**，用于确认信息架构与交互细节，之后再落 React Native 工程。
+本目录包含移动端 PWA、Python API 与 SQLite 数据库，可直接构建成单容器部署。
 
 ## 文档地图
 
 | 文档 | 内容 |
 |---|---|
 | [AGENTS.md](AGENTS.md) | **产品说明书**：定位、用户旅程、页面职责、业务规则、内容规范、设计语言、已定稿决策 |
-| [docs/ENGINEERING.md](docs/ENGINEERING.md) | 工程实现：代码地图、命令、测试、部署、常见坑 |
-| [deploy/README.md](deploy/README.md) | 公网部署操作手册（Caddy / nginx / HTTPS / 添加到主屏幕） |
+| [docs/ENGINEERING.md](docs/ENGINEERING.md) | 工程实现：代码地图、数据模型、命令、测试与常见坑 |
+| [deploy/README.md](deploy/README.md) | Docker、HTTPS、域名、备份、生产环境变量与上线检查 |
 
-## 打开
+## 本地运行
 
-原型已在本地跑起来：
+推荐用 Docker（自动创建持久化数据库卷）：
 
-```
-http://127.0.0.1:4321/
-```
-
-重启方式（服务带 `no-store`，改了代码刷新即生效）：
-
-```powershell
-python tools/serve.py
+```bash
+docker compose up -d --build
 ```
 
-也可以直接双击 `prototype/index.html`（纯静态，无构建、无依赖、无网络请求）。
+打开 `http://127.0.0.1:18080/`。体验版验证码固定为 `123456`，也可以在注册页点“先随便看看”创建独立体验账号。
+
+不用 Docker 时：
+
+```bash
+python3 -m pip install -r server/requirements.txt
+DEMO_MODE=1 DEMO_OTP=123456 PORT=18080 python3 server/app.py
+```
+
+生产环境不能双击 `prototype/index.html`：登录、画像、地址、订单和凭证依赖同域 API。
 
 ### 如果打不开或点了没反应
 
-1. **强制刷新**：`Ctrl + Shift + R`（Mac 是 `Cmd + Shift + R`）。开发过程中改过十几版，浏览器可能缓存了中间版本。
-2. 页面底部若出现**红色横幅**，把上面的文字发我 —— 那是运行时异常的诊断信息。
-3. 想跳过注册直接看：点注册页底部「先随便看看（跳过注册）」，或用 `?demo=1` 链接。
+1. 强制刷新：`Ctrl + Shift + R`（Mac 是 `Cmd + Shift + R`）。
+2. 页面若出现红色横幅，把上面的文字和版本号发回来。
+3. 想跳过注册直接看：点注册页底部“先随便看看”，或访问 `?demo=1#/home`。
 
 ## 60 秒体验路线
 
 | 步骤 | 操作 | 看点 |
 |---|---|---|
-| 1 | 输入任意 11 位手机号 →「获取验证码」（自动填 123456）→ 注册 | 验证码倒计时、协议勾选 |
-| 2 | 画像页选爱好/性格/职业/性别 | 多选上限 5/3、满额降透明、计数、昵称骰子 |
-| 3 | 地图页选地址 → 确认 | 中心针、附近 POI、底部抽屉 |
-| 4 | 首页下滑 | 双列瀑布流、骨架屏、触底加载（16 条分两页） |
-| 5 | 点卡片 → 详情 | 日期横条（周末溢价/余位/售罄）、人数步进改价、铁路时间轴 |
-| 6 | 立即下单 → 确认支付 | 费用明细含折扣行、支付遮罩 |
-| 7 | 下单成功页 | 勾选动效、金额、每站一张二维码 + 核销码 |
-| 8 | 点头像 → 个人信息 → 订单 | 三宫格、画像 chips、订单列表分 tab、已完成订单的「已使用」钢印 |
+| 1 | 输入任意 11 位手机号 →「获取验证码」→ 登录 | 服务端验证码、30 天会话、协议勾选 |
+| 2 | 画像页选爱好/性格/职业/性别 | 多选上限、计数、昵称骰子、保存到数据库 |
+| 3 | 地图页选地址 → 确认 | 中心针、附近 POI、默认地址持久化 |
+| 4 | 首页下滑 | 双列瀑布流、骨架屏、触底加载 16 条方案 |
+| 5 | 点卡片 → 详情 | 日期横条、周末溢价、售罄、人数步进改价 |
+| 6 | 立即下单 → 确认支付 | 服务端复核价格、创建订单与逐站凭证 |
+| 7 | 下单成功页 | 每站一张真实可扫描二维码 + 8 位核销码 |
+| 8 | 点头像 → 个人信息 → 订单 | 画像、地址、订单状态全部从 SQLite 恢复 |
 
-想跳过注册直接看：在网址后加 `?demo=1`，例如
-`http://127.0.0.1:4321/?demo=1#/home`（已登录、有地址、有一笔待使用订单和一笔历史订单）。
+跳过注册直接看：
+
+`http://127.0.0.1:18080/?demo=1#/home`
+
+每个体验链接会创建独立的服务端体验账号，带一条默认地址、一笔待使用订单和一笔历史订单。
 
 ## 路由
 
@@ -55,7 +61,7 @@ python tools/serve.py
 |---|---|
 | `#/register` | ① 注册 |
 | `#/profile` | ② 用户画像 |
-| `#/address` | ③ 生活地址（高德选点占位） |
+| `#/address` | ③ 生活地址（地图选点占位） |
 | `#/home` | 首页双列瀑布流 |
 | `#/detail/:tripId` | 目的地详情（时间轴 / 日期 / 人数） |
 | `#/checkout/:tripId` | 确认订单 |
@@ -66,50 +72,53 @@ python tools/serve.py
 
 ## 已实现 / 未实现
 
-**已实现（前端交互全部可点）**
-- 三步引导流、草稿留存（sessionStorage，刷新不丢）
-- 双列瀑布流 + 骨架屏 + 无限加载 + 到底提示
-- 完整价格模型：每人价 / 整团价 / 4 人 9 折 / 5 人 85 折 / 周末溢价
-- 日期档期（余位、售罄、溢价）、人数 1–6 步进
-- 铁路站点式时间轴（首末站线段自动断开）
-- 下单 → 支付 → 凭证发放（N 站 = N 张码）
-- 订单状态：待使用 / 已完成（含「已使用」钢印与核销时间）
+**已实现**
 
-**未实现（刻意留白）**
-- 真实图片：封面用渐变 + emoji 占位
-- 真实二维码：按 token 生成的占位图案，**扫不出内容**（不接支付，无凭证服务）
-- 高德 API：地图是 CSS 画的示意，未接真实定位/POI/逆地理
-- 后端与支付：全部前端模拟，数据存在 sessionStorage
-- 开发者后台：本轮未做界面（设计已定稿）
+- 手机号验证码登录、HttpOnly 服务端会话、退出登录
+- 画像、地址、订单、凭证的 SQLite 持久化
+- 双列瀑布流、骨架屏、无限加载
+- 服务端权威价格：每人价 / 整团价 / 4 人 9 折 / 5 人 85 折 / 周末溢价
+- 日期档期、售罄校验、人数 1–6 步进
+- 下单与逐站凭证发放（N 站 = N 张二维码）
+- 订单状态由凭证聚合：待使用 / 使用中 / 已完成 / 已过期
+- PWA manifest、图标与 Service Worker 离线外壳
+
+**未实现**
+
+- 真实图片：封面仍为渐变 + emoji 占位
+- 高德 API：地图、定位和 POI 为示意数据
+- 微信 / 支付宝真实支付：订单由服务端创建，但尚未接支付渠道回调
+- 短信服务商：默认使用固定体验验证码；上线真实用户前应关闭 `DEMO_MODE`
+- 开发者投放后台、退款审核流、分享/收藏/评价
 
 ## 目录
 
-```
-prototype/
-  index.html      入口（设备外框 + 状态栏）
-  styles.css      设计令牌与全部页面样式
-  data.js         画像枚举 + 16 条行程 mock
-  app.js          路由、状态、10 个页面、价格与二维码生成
-tools/
-  check.js        无浏览器渲染自检（DOM 桩 + 逐页校验）
-  shot.js         CDP 精确视口截图（390×844 @2x）
-  probe.js        CDP 交互探针（滚动加载 / 步进改价 / 支付跳转）
-.shots/           截图产物
-```
-
-## 部署到公网
-
-```powershell
-.\deploy\upload.ps1 -Server 你的服务器IP
+```text
+prototype/          PWA 静态前端
+server/app.py       API、SQLite 迁移、会话、订单与二维码
+server/seed.json    从 data.js 导出的服务端权威行程内容
+tools/check.js      无浏览器渲染自检
+tools/api-smoke.py  已部署服务的 HTTP 全链路自检
+tools/browser-smoke.js 真实 Chromium 首页/下单/二维码回归
+tools/probe.js      CDP 交互回归（需要 Chromium）
+Dockerfile          单容器生产镜像
+compose.yaml        本地/单机部署编排与数据卷
 ```
 
-服务器端的 Caddy / nginx 配置、HTTPS、手机「添加到主屏幕」、访问口令，见
-[deploy/README.md](deploy/README.md)。
+## 部署
+
+```bash
+docker compose up -d --build
+```
+
+域名、HTTPS、反向代理、数据备份和生产环境变量见 [deploy/README.md](deploy/README.md)。
 
 ## 自检
 
-```powershell
-node tools/check.js    # 每页渲染 + 事件绑定 id + 导航目标 + 价格模型
-node tools/probe.js    # 需要本地服务在跑：真实点击与滚动
-node tools/shot.js     # 重新生成 .shots/*.png
+```bash
+node tools/check.js
+BASE_URL=http://127.0.0.1:18080 python3 tools/api-smoke.py
+node tools/browser-smoke.js   # 需先启动 CDP_URL 指向的 Chromium
 ```
+
+`check.js` 覆盖页面渲染、事件绑定、导航和价格模型；`api-smoke.py` 覆盖静态站、体验会话、下单、二维码、持久化和退出登录；`browser-smoke.js` 覆盖真实浏览器里的首页、下单和凭证渲染。

@@ -4,34 +4,41 @@
 
 ## 这是什么（技术视角）
 
-纯静态单页应用：HTML + CSS + 原生 JS，**无框架、无构建、无依赖**。双击 `prototype/index.html` 就能跑。
+移动端 PWA + Python API + SQLite 的单容器应用：
 
-- 数据全在浏览器 `sessionStorage`（key `trip_proto_v1`），无后端
-- 部分内容是假的：封面渐变+emoji、二维码是占位图案（扫不出内容）、地图是 CSS 画的、支付是 1.4 秒假支付
-- 11 条路由、11 个 Screen 对象、1388 行 `app.js`
+- `prototype/` 是 HTML + CSS + 原生 JS 前端，无框架、无前端构建
+- `server/app.py` 同时输出静态文件与 `/api/*`
+- 用户、会话、画像、地址、订单、凭证和行程内容保存在 SQLite
+- 订单金额由服务端按权威行程重新计算；凭证二维码由服务端生成
+- 封面渐变+emoji、地图/POI、支付渠道仍是演示实现
+
+账号会话使用 HttpOnly Cookie。刷新页面后通过 `GET /api/bootstrap` 恢复当前用户、默认地址和订单列表。
 
 ## 快速开始
 
 | 目的 | 命令 |
 |---|---|
-| 本地预览（**推荐**） | `python tools/serve.py` → http://127.0.0.1:4321/ |
+| 本地完整运行（**推荐**） | `docker compose up -d --build` → http://127.0.0.1:18080/ |
+| 本地非 Docker 运行 | `pip install -r server/requirements.txt && DEMO_MODE=1 python server/app.py` |
 | 渲染自检（无需浏览器） | `node tools/check.js` |
-| 交互回归（需服务在跑） | `node tools/probe.js` |
+| 已部署服务全链路测试 | `BASE_URL=http://127.0.0.1:18080 python3 tools/api-smoke.py` |
+| 真实浏览器端到端测试 | 启动 CDP 后 `BASE_URL=http://127.0.0.1:18080 node tools/browser-smoke.js` |
+| 交互回归（需 Chromium） | `node tools/probe.js` |
 | 导航回归 | `node tools/diag5.js` |
 | 单项编辑回归 | `node tools/diag6.js` |
 | 截图（390×844 @2x） | `node tools/shot.js` → `.shots/` |
 | 重生成 PWA 图标 | `python tools/make_icons.py`（需 Pillow） |
-| 一键部署到服务器 | `.\deploy\upload.ps1 -Server <IP>` |
+| 重生成服务端种子 | `node tools/export-seed.js` |
 
 两点注意：
 
 - `tools/serve.py` 带 `Cache-Control: no-store`。**不要换成 `python -m http.server`**，那个会缓存，改完代码刷新看不到效果。
-- `probe.js` / `diag*.js` / `shot.js` 走 Chrome DevTools Protocol，脚本里**硬编码了 Windows 的 Chrome 路径**。在 Linux 上跑要改 `CHROME` 常量（如 `/usr/bin/google-chrome`），并且要有本地服务在 4321。
+- `probe.js` / `diag*.js` / `shot.js` 走 Chrome DevTools Protocol。可用 `CHROME_PATH` 指定浏览器，用 `BASE_URL` 指定站点；默认站点是 http://127.0.0.1:18080/。
 
 ## 目录
 
 ```
-prototype/              要部署的全部静态文件
+prototype/              前端 PWA
 ├── index.html          入口：设备外框、PWA meta、SW 注册（仅 https）
 ├── styles.css          设计令牌 + 全部页面样式（:root 里是颜色/圆角）
 ├── data.js             TAXONOMY（画像枚举）+ TRIPS（16 条行程 mock）
@@ -40,10 +47,47 @@ prototype/              要部署的全部静态文件
 ├── manifest.webmanifest
 └── icons/              192/512/maskable/apple-touch
 
-deploy/                 部署配置与手册（Caddyfile、nginx、上传脚本、README）
-tools/                  自检 / 回归 / 截图 / 图标 / 静态服务
+server/
+├── app.py              API、SQLite、会话、订单、真实二维码
+├── seed.json           服务端权威画像与行程内容
+└── requirements.txt    仅 segno 一个运行依赖
+
+deploy/                 反向代理配置与运维手册
+tools/                  自检 / HTTP 探针 / 回归 / 图标 / 种子导出
+Dockerfile              生产镜像
+compose.yaml            单机编排与持久化数据卷
 docs/                   文档
 ```
+
+## 服务端数据模型
+
+| 表 | 用途 |
+|---|---|
+| `trips` | 服务端权威行程内容，启动时从 `server/seed.json` 同步 |
+| `users` | 手机号、昵称和四类画像 |
+| `sessions` | 只存会话 token 的 SHA-256 哈希，30 天过期 |
+| `otp_challenges` | 验证码哈希、过期时间与尝试次数 |
+| `addresses` | 每用户最多 5 条地址，恰好一条默认地址 |
+| `orders` | 目的地、出行日期、人数、服务端结算金额、地址快照 |
+| `vouchers` | 每站一张，独立二维码内容与 8 位核销码 |
+
+订单表不保存独立的“部分核销”字段。读取时按凭证状态和出行日期聚合为 `paid / partially_used / completed / expired`。
+
+## API
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/health` | 健康检查 |
+| `GET` | `/api/bootstrap` | 目录 + 当前用户完整状态 |
+| `POST` | `/api/auth/request-code` | 创建验证码 challenge |
+| `POST` | `/api/auth/verify` | 验证并建立 Cookie 会话 |
+| `POST` | `/api/auth/demo` | 创建独立体验账号（仅 `DEMO_MODE=1`） |
+| `POST` | `/api/auth/logout` | 撤销会话 |
+| `PATCH` | `/api/profile` | 保存画像与昵称 |
+| `PATCH` | `/api/nickname` | 仅保存昵称 |
+| `POST` | `/api/addresses` | 新增地址 |
+| `POST` | `/api/orders` | 服务端复核并创建订单与逐站凭证 |
+| `GET` | `/api/vouchers/:id/qr.svg` | 当前用户有权限的真实二维码 |
 
 ## 代码地图（prototype/app.js）
 
@@ -54,7 +98,7 @@ docs/                   文档
 3. 状态：`blankState()` → `S` → `save()`
 4. 业务计算：`tripStats()`（总价/人均/折扣）、`stopSubtotal()`、`labelOf()`、`dateKey/dateLabel/dateShort`
 5. 订单：`createOrder()`、`ensureSeed()`（预置一条历史已完成订单）
-6. 二维码占位：`qrGrid()` / `qrSvg()`（按行合并的 path，别退回逐格 rect，会让单页从 18KB 涨到 58KB）
+6. 二维码：线上凭证使用服务端 `segno` 生成真实二维码；前端 `qrGrid()` / `qrSvg()` 只保留给无浏览器的本地渲染自检
 7. 通用片段：`skeletonCard` `feedCardHtml` `voucherCardHtml` `orderCardHtml`
 8. **11 个 Screen 对象**，每个形如 `{ theme: 'light'|'dark', render(id, params), mount(id, params) }`
 9. `demoBootstrap()`：`?demo=1` 直接进入已登录状态
@@ -80,10 +124,10 @@ docs/                   文档
 
 破坏任何一条都会让线上出问题：
 
-1. **不要引入构建步骤或 npm 依赖。** 纯静态站，`index.html` 直接双击也要能跑。
+1. **前端不要引入构建步骤或 npm 依赖。** `prototype/` 仍是可直接托管的 HTML/CSS/JS；完整业务必须通过 API 运行。
 2. **不要删 `bootGuard()` 和全局 `window.onerror` 横幅。** 之前 `data.js` 加载失败时，注册按钮点了没反应、页面静默卡死。
 3. **不要只依赖 `hashchange`。** 路由有 250ms 轮询兜底（某些内嵌 WebView 不派发该事件），`render()` 开头有 `if (bootFailed) return;` 闸门——否则轮询会把启动错误页冲掉。
-4. **Service Worker 只在 https 下注册。** 改 `sw.js` 要同步升 `VERSION`。
+4. **Service Worker 只在 https 下注册。** 改 `sw.js` 要同步升 `VERSION`；`/api/*` 永远不能进入缓存。
 5. **跳转统一用 `data-nav` / `data-back`**（document 上的委托），不要写 `onclick="location.hash=..."`，动态插入的卡片会绑不上。
 6. **每次改 UI 都要升 `APP_VER`**（注册页底部、个人信息页脚都显示），这是核对"是不是新版"的唯一手段。
 7. `.shots/` 已在 `.gitignore`；不要提交截图。
@@ -110,6 +154,8 @@ docs/                   文档
 
 ```bash
 node tools/check.js     # 10 个页面渲染 + 绑定 id 存在性 + 导航目标 + 价格模型
+BASE_URL=http://127.0.0.1:18080 python3 tools/api-smoke.py
+BASE_URL=http://127.0.0.1:18080 node tools/browser-smoke.js
 node tools/probe.js     # 无限加载 / 人数改价 / 支付跳转 / 凭证数量（需服务在跑）
 node tools/diag5.js     # 首页↔个人信息↔订单 的返回栈
 node tools/diag6.js     # 单项编辑：只显示该字段、保存后回个人信息
@@ -148,11 +194,16 @@ git config core.hooksPath tools/githooks       # Linux / macOS / Git Bash
 
 ## 部署
 
-静态站，见 [deploy/README.md](../deploy/README.md)。
+见 [deploy/README.md](../deploy/README.md)。
 
-- 服务器 `git clone` 后，nginx `root` 指向 `prototype/`，`git pull` 即上线
-- 上 HTTPS（Caddy 自动证书）后手机可「添加到主屏幕」当 App 用
-- **必须加访问口令**：原型无鉴权，挂公网等于公开
+```bash
+docker compose up -d --build
+```
+
+- 应用和 SQLite 同容器运行，数据在 `goapp-data` 命名卷
+- Caddy / nginx 只做 HTTPS 反向代理到 `127.0.0.1:18080`
+- `DEMO_MODE=1` 用于体验环境；接真实短信后设 `DEMO_MODE=0`
+- 重建容器不会丢数据；禁止随意 `docker compose down -v`
 
 ## 常见坑
 
@@ -162,5 +213,5 @@ git config core.hooksPath tools/githooks       # Linux / macOS / Git Bash
 | 点按钮没反应 | `data.js` 没加载 → 看页面底部红色横幅；或 `hashchange` 没触发 → 确认轮询仍在 |
 | 点进页面出不来 | 新页面漏了返回按钮（`data-back`） |
 | 卡片高度不齐 | 标题必须固定 2 行高（`height:40px` + `-webkit-line-clamp:2`） |
-| 二维码单页体积暴涨 | `qrSvg` 退回逐格 `<rect>` 了，要用按行合并的 `<path>` |
+| 二维码 401 | 用户会话已失效；重新登录后凭证图片会随 Cookie 加载 |
 | 状态栏文字看不清 | 只有 `theme:'dark'` 的页面（详情页）才是白色状态栏 |
