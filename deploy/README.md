@@ -13,6 +13,16 @@
   --domain trip.example.com
 ```
 
+如果同时迁移现有数据，追加数据库备份：
+
+```bash
+./deploy/deploy.sh --remote root@203.0.113.10 \
+  --domain trip.example.com \
+  --restore-file ./goapp-2026-11-17.sqlite3
+```
+
+恢复文件会先上传到目标机 `/tmp`，部署脚本停止应用、替换持久卷中的 SQLite 数据库、修复文件权限，再启动并执行健康检查；任务结束后自动清理远端临时备份。
+
 脚本会：
 
 1. 通过 SSH 把最新脚本传到目标机，并安装 Docker。

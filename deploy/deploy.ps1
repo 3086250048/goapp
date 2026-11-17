@@ -7,6 +7,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Remote,
     [string]$Domain = "",
+    [string]$RestoreFile = "",
     [string]$Branch = "master",
     [int]$SshPort = 22,
     [ValidateSet("0", "1")][string]$DemoMode = "1"
@@ -33,6 +34,14 @@ $bashArgs = @(
 
 if ($Domain) {
     $bashArgs += @("--domain", $Domain)
+}
+if ($RestoreFile) {
+    $resolvedRestore = (Resolve-Path $RestoreFile -ErrorAction Stop).Path
+    $wslRestore = (& wsl wslpath -a -u $resolvedRestore).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法把数据库备份路径转换为 WSL 路径"
+    }
+    $bashArgs += @("--restore-file", $wslRestore)
 }
 
 function Quote-Bash([string]$Value) {

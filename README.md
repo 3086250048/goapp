@@ -116,7 +116,7 @@ deploy/deploy.ps1   Windows / WSL 入口
   --domain trip.example.com
 ```
 
-脚本会安装 Docker、拉取最新代码、生成 `.env`、启动 SQLite 数据卷、可选启用 Caddy HTTPS，并验证健康检查。重复执行同一条命令即为更新。Windows 使用 `.\deploy\deploy.ps1`，或在 WSL 中运行同一 Bash 命令。
+迁移已有数据时追加 `--restore-file ./goapp-backup.sqlite3`。脚本会安装 Docker、拉取最新代码、生成 `.env`、启动 SQLite 数据卷、按需导入备份、可选启用 Caddy HTTPS，并验证健康检查。重复执行同一条命令即为更新。Windows 使用 `.\deploy\deploy.ps1`，或在 WSL 中运行同一 Bash 命令。
 
 只在服务器本地启动、不配公网域名：
 

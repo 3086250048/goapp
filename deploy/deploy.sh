@@ -15,6 +15,7 @@ APP_PORT="${APP_PORT:-18080}"
 DEMO_MODE="${DEMO_MODE:-1}"
 DEMO_OTP="${DEMO_OTP:-123456}"
 REPO_URL="${REPO_URL:-$DEFAULT_REPO_URL}"
+RESTORE_FILE="${RESTORE_FILE:-}"
 SKIP_PULL=0
 BOOTSTRAP=0
 
@@ -42,6 +43,7 @@ usage() {
   --app-port PORT      仅绑定本机的应用端口，默认 18080
   --branch NAME        部署分支，默认 master
   --repo-url URL       远端拉取的 Git 仓库地址
+  --restore-file PATH  部署时导入 SQLite 备份（可选）
   --demo-mode 0|1      是否开启体验账号与固定验证码，默认 1
   --demo-otp CODE      体验验证码，默认 123456
   --skip-pull          本次不更新 Git，适合服务器上离线重跑
@@ -64,6 +66,7 @@ while (($#)); do
     --app-port) APP_PORT="${2:-}"; shift 2 ;;
     --branch) BRANCH="${2:-}"; shift 2 ;;
     --repo-url) REPO_URL="${2:-}"; shift 2 ;;
+    --restore-file) RESTORE_FILE="${2:-}"; shift 2 ;;
     --demo-mode) DEMO_MODE="${2:-}"; shift 2 ;;
     --demo-otp) DEMO_OTP="${2:-}"; shift 2 ;;
     --skip-pull) SKIP_PULL=1; shift ;;
@@ -84,6 +87,9 @@ done
 if [[ -n "$DOMAIN" && ! "$DOMAIN" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}$ ]]; then
   fail "域名格式无效：$DOMAIN"
 fi
+if [[ -n "$RESTORE_FILE" && ! -f "$RESTORE_FILE" ]]; then
+  fail "恢复文件不存在：$RESTORE_FILE"
+fi
 
 if [[ -n "$REMOTE" ]]; then
   have ssh || fail "本机缺少 ssh"
@@ -100,6 +106,14 @@ if [[ -n "$REMOTE" ]]; then
   )
   [[ -n "$DOMAIN" ]] && remote_args+=(--domain "$DOMAIN")
   ((SKIP_PULL)) && remote_args+=(--skip-pull)
+  remote_restore=""
+  if [[ -n "$RESTORE_FILE" ]]; then
+    have scp || fail "本机缺少 scp，无法上传数据库备份"
+    remote_restore="/tmp/goapp-restore-$(date +%s)-$$.sqlite3"
+    log "上传数据库备份"
+    scp -P "$SSH_PORT" -- "$RESTORE_FILE" "$REMOTE:$remote_restore"
+    remote_args+=(--restore-file "$remote_restore")
+  fi
 
   quoted=""
   for arg in "${remote_args[@]}"; do
@@ -107,8 +121,15 @@ if [[ -n "$REMOTE" ]]; then
     quoted+=" '$escaped'"
   done
   remote_cmd="if [ \"\$(id -u)\" -eq 0 ]; then bash -s --$quoted; else sudo bash -s --$quoted; fi"
+  set +e
   ssh -p "$SSH_PORT" -o ServerAliveInterval=30 "$REMOTE" "$remote_cmd" < "${BASH_SOURCE[0]}"
-  exit $?
+  status=$?
+  set -e
+  if [[ -n "$remote_restore" ]]; then
+    ssh -p "$SSH_PORT" -o ServerAliveInterval=30 "$REMOTE" \
+      "rm -f '$remote_restore'" >/dev/null 2>&1 || true
+  fi
+  exit "$status"
 fi
 
 if [[ "$(uname -s)" != "Linux" ]]; then
@@ -186,8 +207,16 @@ if ((BOOTSTRAP)); then
     --skip-pull
   )
   [[ -n "$DOMAIN" ]] && args+=(--domain "$DOMAIN")
+  [[ -n "$RESTORE_FILE" ]] && args+=(--restore-file "$RESTORE_FILE")
   log "切换到最新部署脚本"
-  exec bash "$APP_DIR/deploy/deploy.sh" "${args[@]}"
+  set +e
+  bash "$APP_DIR/deploy/deploy.sh" "${args[@]}"
+  status=$?
+  set -e
+  if [[ -n "$RESTORE_FILE" ]]; then
+    rm -f "$RESTORE_FILE"
+  fi
+  exit "$status"
 fi
 
 if [[ -f "$DEFAULT_REPO_ROOT/compose.yaml" && -f "$DEFAULT_REPO_ROOT/Dockerfile" ]]; then
@@ -227,6 +256,31 @@ log "构建应用镜像"
 "${compose[@]}" build goapp
 if [[ -n "$DOMAIN" ]]; then
   "${compose[@]}" --profile https pull caddy || warn "Caddy 镜像拉取失败；若本地已有镜像仍可继续"
+fi
+
+if [[ -n "$RESTORE_FILE" ]]; then
+  restore_abs=$(cd -- "$(dirname -- "$RESTORE_FILE")" && pwd)/$(basename -- "$RESTORE_FILE")
+  log "导入 SQLite 备份（会替换当前数据库）"
+  "${compose[@]}" stop goapp >/dev/null 2>&1 || true
+  "${compose[@]}" run --rm --user root --no-deps \
+    -v "$restore_abs:/restore.sqlite3:ro" \
+    --entrypoint python goapp -c '
+import os, sqlite3
+for path in ("/data/goapp.sqlite3", "/data/goapp.sqlite3-wal", "/data/goapp.sqlite3-shm"):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+source = sqlite3.connect("/restore.sqlite3")
+target = sqlite3.connect("/data/goapp.sqlite3")
+source.backup(target)
+target.execute("PRAGMA journal_mode=WAL")
+target.close()
+source.close()
+'
+  "${compose[@]}" run --rm --user root --no-deps \
+    --entrypoint chown goapp -R goapp:goapp /data
+  ok "数据库备份已导入"
 fi
 
 log "启动应用与数据库"
