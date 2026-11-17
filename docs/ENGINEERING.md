@@ -86,6 +86,9 @@ Android 包使用 `aapt2 + javac + dx + apksigner` 构建，不依赖 Gradle。A
 | `taxonomy_tags` | 四类可配置标签；启用状态与排序直接影响用户端画像页 |
 | `admin_sessions` | 管理员独立 12 小时会话，只保存 token 哈希 |
 | `admin_audit` | 管理员登录及用户/标签写操作审计 |
+| `oauth_identities` | 微信/QQ openid 与用户绑定关系 |
+| `oauth_states` | 一次性 OAuth state，10 分钟失效 |
+| `oauth_pending` | 第三方授权完成但尚未绑定手机号的短期身份 |
 
 订单表不保存独立的“部分核销”字段。读取时按凭证状态和出行日期聚合为 `paid / partially_used / completed / expired`。
 
@@ -94,6 +97,7 @@ Android 包使用 `aapt2 + javac + dx + apksigner` 构建，不依赖 Gradle。A
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/api/health` | 健康检查 |
+| `GET` | `/api/public-config` | 短信、高德、微信、QQ 启用状态（不含密钥） |
 | `GET` | `/api/bootstrap` | 目录 + 当前用户完整状态 |
 | `POST` | `/api/auth/request-code` | 创建验证码 challenge |
 | `POST` | `/api/auth/verify` | 验证并建立 Cookie 会话 |
@@ -104,6 +108,12 @@ Android 包使用 `aapt2 + javac + dx + apksigner` 构建，不依赖 Gradle。A
 | `POST` | `/api/addresses` | 新增地址 |
 | `POST` | `/api/orders` | 服务端复核并创建订单与逐站凭证 |
 | `GET` | `/api/vouchers/:id/qr.svg` | 当前用户有权限的真实二维码 |
+| `GET` | `/api/auth/oauth/wechat/start` | 微信网站应用 OAuth 跳转 |
+| `GET` | `/api/auth/oauth/qq/start` | QQ 互联 OAuth 跳转 |
+| `GET` | `/api/auth/oauth/:provider/callback` | 授权码换身份、登录或进入手机号绑定 |
+| `GET` | `/api/location/search` | 高德地点关键字搜索，服务端 Key 代理 |
+| `GET` | `/api/location/reverse` | 高德逆地理编码，支持 GPS 坐标转换 |
+| `GET` | `/api/location/static` | 高德静态地图代理 |
 | `POST` | `/api/admin/login` | 管理员登录，独立 HttpOnly Cookie |
 | `GET` | `/api/admin/dashboard` | 后台统计与最近订单/用户 |
 | `GET/POST` | `/api/admin/trips` | 首页项目分页搜索与新增 |

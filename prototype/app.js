@@ -5,7 +5,7 @@
    ============================================================ */
 
 /* ---------------- 运行时错误可见化 ---------------- */
-const APP_VER = '2.2.0';
+const APP_VER = '2.3.0';
 console.log('[出行] v' + APP_VER);
 
 window.addEventListener('error', e => {
@@ -59,7 +59,14 @@ function blankState() {
     addresses: [],
     defaultId: null,
     orders: [],
-    lastChannel: 'wechat'
+    lastChannel: 'wechat',
+    integrations: {
+      sms: { provider: 'demo', enabled: false, demo: false },
+      amap: { enabled: false },
+      wechat: { enabled: false },
+      qq: { enabled: false }
+    },
+    oauthBindings: []
   };
 }
 
@@ -91,6 +98,8 @@ function applyRemoteState(data) {
   }
   const next = blankState();
   next.demo = Boolean(data.demo);
+  next.integrations = Object.assign(next.integrations, data.integrations || {});
+  next.oauthBindings = Array.isArray(data.oauthBindings) ? data.oauthBindings : [];
   if (data.auth && data.user) {
     next.auth = true;
     next.phone = data.user.phone || '';
@@ -377,8 +386,8 @@ const RegisterScreen = {
 
         <div class="divider"><span>其他方式登录</span></div>
         <div class="oauth">
-          <button class="oauth-btn wx" id="wx">微信</button>
-          <button class="oauth-btn qq" id="qq">QQ</button>
+          <button class="oauth-btn wx ${S.integrations.wechat.enabled ? '' : 'off'}" id="wx">微信</button>
+          <button class="oauth-btn qq ${S.integrations.qq.enabled ? '' : 'off'}" id="qq">QQ</button>
         </div>
 
         <button class="skip-demo" id="skip" type="button">先随便看看（跳过注册）</button>
@@ -447,8 +456,9 @@ const RegisterScreen = {
           body: { phone: phoneEl.value.trim(), code: codeEl.value.trim() }
         });
         applyRemoteState(data);
-        if (location.hash === '#/profile') render();
-        else location.hash = '#/profile';
+        const nextRoute = S.profile.hobby.length ? '#/home' : '#/profile';
+        if (location.hash === nextRoute) render();
+        else location.hash = nextRoute;
       } catch (e) {
         toast(e.message);
         submit.disabled = false;
@@ -474,8 +484,19 @@ const RegisterScreen = {
       finish();
     };
 
-    $('#wx').onclick = () => toast('微信登录尚未接入，请使用手机号登录');
-    $('#qq').onclick = () => toast('QQ 登录尚未接入，请使用手机号登录');
+    $('#wx').onclick = () => {
+      if (!S.integrations.wechat.enabled) return toast('微信登录尚未配置');
+      location.href = '/api/auth/oauth/wechat/start?return_to=%2F';
+    };
+    $('#qq').onclick = () => {
+      if (!S.integrations.qq.enabled) return toast('QQ 登录尚未配置');
+      location.href = '/api/auth/oauth/qq/start?return_to=%2F';
+    };
+
+    const oauthResult = new URLSearchParams(location.search).get('oauth');
+    if (oauthResult === 'bind') setTimeout(() => toast('授权成功，请绑定手机号完成登录'), 300);
+    if (oauthResult === 'error') setTimeout(() => toast('第三方授权失败，请重试'), 300);
+    if (oauthResult === 'invalid') setTimeout(() => toast('授权状态已失效，请重试'), 300);
 
     $('#skip').onclick = async () => {
       $('#skip').disabled = true;
@@ -596,8 +617,8 @@ const ProfileScreen = {
   }
 };
 
-/* ---------------- ③ 地址（高德选点占位） ---------------- */
-const POIS = [
+/* ---------------- ③ 地址（高德地点搜索 / 逆地理） ---------------- */
+const FALLBACK_POIS = [
   { name: '阳光里小区 3 号楼', line: '朝阳区望京街道阜通东大街 6 号 · 距中心 12m', tag: '家' },
   { name: '星巴克（望京SOHO店）', line: '朝阳区望京街 10 号 SOHO T1 · 120m', tag: '其他' },
   { name: '望京SOHO', line: '朝阳区望京街 10 号 · 260m', tag: '公司' },
@@ -609,30 +630,27 @@ const AddressScreen = {
   render() {
     return `<div class="screen immersive" style="background:#F1F2EE">
       <div class="map-wrap">
-        <div class="map">
+        <div class="map" id="fallbackMap">
           <div class="road r1"></div><div class="road r2"></div><div class="road r3"></div>
           <div class="blk b1"></div><div class="blk b2"></div><div class="blk b3"></div><div class="blk b4"></div>
         </div>
+        <img class="map-static" id="mapImage" alt="高德地图" hidden>
         <div class="pin-shadow"></div>
         <div class="pin-center"></div>
       </div>
 
       <div class="searchbar">
         <button class="back" id="backAddr">‹</button>
-        <div class="searchpill">🔍 搜索小区 / 写字楼 / 学校</div>
+        <div class="searchpill"><span>🔍</span><input id="addrSearch" placeholder="搜索小区 / 写字楼 / 学校" autocomplete="off"><button class="addr-search-btn" id="addrSearchBtn">搜索</button></div>
       </div>
 
       <button class="locate-btn" id="locateBtn">◎</button>
 
       <div class="sheet">
         <div class="grab"></div>
-        <h2 id="addrName">${POIS[0].name}</h2>
-        <p class="addrline" id="addrLine">${POIS[0].line}</p>
-        <div class="poi-list">
-          ${POIS.map((p, i) => `<div class="poi ${i === 0 ? 'on' : ''}" data-i="${i}">
-            <span class="nm">${p.name}</span><span class="ds">${p.line.split('·').pop().trim()}</span>
-          </div>`).join('')}
-        </div>
+        <h2 id="addrName">${FALLBACK_POIS[0].name}</h2>
+        <p class="addrline" id="addrLine">${FALLBACK_POIS[0].line}</p>
+        <div class="poi-list" id="poiList"></div>
         <button class="btn-primary" id="confirmAddr">确认使用该地址</button>
       </div>
     </div>`;
@@ -641,23 +659,107 @@ const AddressScreen = {
     const root = $('.screen', appEl);
     const from = (params && params.from) || (S.auth && S.addresses.length ? 'me' : 'onboarding');
     let picked = 0;
+    let places = FALLBACK_POIS.slice();
+
+    function mapLocation(location) {
+      if (!location) return;
+      const [lng, lat] = location.split(',');
+      const image = $('#mapImage', root);
+      image.src = `/api/location/static?lng=${encodeURIComponent(lng)}&lat=${encodeURIComponent(lat)}`;
+      image.hidden = false;
+      $('#fallbackMap', root).style.display = 'none';
+    }
+
+    function paintPlaces() {
+      $('#poiList', root).innerHTML = places.map((p, i) => `<div class="poi ${i === picked ? 'on' : ''}" data-i="${i}">
+        <span class="nm">${esc(p.name)}</span><span class="ds">${esc(p.distance || (p.line || '').split('·').pop().trim())}</span>
+      </div>`).join('');
+      const current = places[picked];
+      $('#addrName', root).textContent = current.name;
+      $('#addrLine', root).textContent = current.line;
+      mapLocation(current.location);
+    }
+
+    function usePlaces(next) {
+      places = next.length ? next : places;
+      picked = 0;
+      paintPlaces();
+    }
+
+    async function searchAddress() {
+      if (!S.integrations.amap.enabled) {
+        toast('高德地图尚未配置，当前使用演示地址');
+        return;
+      }
+      const keywords = $('#addrSearch', root).value.trim();
+      if (!keywords) return toast('请输入地点关键词');
+      $('#addrSearchBtn', root).disabled = true;
+      try {
+        const data = await api(`/api/location/search?keywords=${encodeURIComponent(keywords)}`);
+        if (!data.items.length) return toast('没有找到匹配地点');
+        usePlaces(data.items.map(item => ({
+          id: item.id,
+          name: item.name,
+          line: [item.city, item.district, item.address].filter(Boolean).join(' · ') || item.name,
+          tag: '其他',
+          location: item.location,
+          distance: item.distance ? `${item.distance}m` : item.type
+        })));
+      } catch (e) {
+        toast(e.message);
+      } finally {
+        $('#addrSearchBtn', root).disabled = false;
+      }
+    }
 
     root.addEventListener('click', e => {
       const p = e.target.closest('.poi');
       if (!p) return;
       picked = Number(p.dataset.i);
       $$('.poi', root).forEach(x => x.classList.toggle('on', x === p));
-      $('#addrName', root).textContent = POIS[picked].name;
-      $('#addrLine', root).textContent = POIS[picked].line;
+      const current = places[picked];
+      $('#addrName', root).textContent = current.name;
+      $('#addrLine', root).textContent = current.line;
+      mapLocation(current.location);
     });
 
     $('#backAddr', root).onclick = () => {
       goBack(from === 'onboarding' ? '#/profile' : (from === 'me' ? '#/me' : '#/home'));
     };
-    $('#locateBtn', root).onclick = () => toast('已定位到当前位置');
+    $('#addrSearchBtn', root).onclick = searchAddress;
+    $('#addrSearch', root).onkeydown = event => {
+      if (event.key === 'Enter') searchAddress();
+    };
+    $('#locateBtn', root).onclick = () => {
+      if (!S.integrations.amap.enabled) return toast('高德地图尚未配置');
+      if (!navigator.geolocation) return toast('当前设备不支持定位');
+      $('#locateBtn', root).disabled = true;
+      navigator.geolocation.getCurrentPosition(async position => {
+        try {
+          const { longitude, latitude } = position.coords;
+          const data = await api(`/api/location/reverse?lng=${longitude}&lat=${latitude}&coordsys=gps`);
+          const nearest = data.pois && data.pois[0];
+          usePlaces([{
+            name: nearest ? nearest.name : '我的位置',
+            line: data.address || '已定位到当前位置',
+            tag: '其他',
+            location: data.location
+          }]);
+          toast('已定位到当前位置');
+        } catch (e) {
+          toast(e.message);
+        } finally {
+          $('#locateBtn', root).disabled = false;
+        }
+      }, () => {
+        $('#locateBtn', root).disabled = false;
+        toast('定位失败，请手动搜索地址');
+      }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+    };
 
     $('#confirmAddr', root).onclick = async () => {
-      const p = POIS[picked];
+      const p = places[picked];
+      const [longitude, latitude] = p.location ? p.location.split(',') : [null, null];
       const button = $('#confirmAddr', root);
       if (!S.addresses.length) {
         button.disabled = true;
@@ -667,8 +769,10 @@ const AddressScreen = {
             body: {
               tag: p.tag,
               name: p.name,
-              address: p.line.split('·')[0].trim(),
-              detail: ''
+              address: (p.line || p.name).split('·')[0].trim(),
+              detail: '',
+              longitude,
+              latitude
             }
           });
           applyRemoteState(data);
@@ -684,6 +788,8 @@ const AddressScreen = {
         else goBack(from === 'me' ? '#/me' : '#/home');
       }, 420);
     };
+
+    paintPlaces();
   }
 };
 
@@ -1128,6 +1234,8 @@ const MeScreen = {
     const recent = pending[0] || S.orders[0];
     const p = S.profile;
     const addr = defaultAddress();
+    const wechatBound = S.oauthBindings.includes('wechat');
+    const qqBound = S.oauthBindings.includes('qq');
 
     const chipList = (k) => {
       const v = p[k];
@@ -1191,8 +1299,8 @@ const MeScreen = {
         <div class="gap"></div>
 
         <div class="inforow"><span class="k">手机号</span><span class="v">${esc(maskedPhone(S.phone))}</span><span class="a"></span></div>
-        <div class="inforow"><span class="k">微信</span><span class="v" style="color:#C0C4CC">未接入</span><span class="a"></span></div>
-        <div class="inforow"><span class="k">QQ</span><span class="v" style="color:#C0C4CC">未接入</span><span class="a"></span></div>
+        <div class="inforow"><span class="k">微信</span><span class="v" style="color:${wechatBound ? 'var(--orange)' : '#C0C4CC'}">${wechatBound ? '已绑定' : (S.integrations.wechat.enabled ? '未绑定' : '未配置')}</span><span class="a"></span></div>
+        <div class="inforow"><span class="k">QQ</span><span class="v" style="color:${qqBound ? 'var(--orange)' : '#C0C4CC'}">${qqBound ? '已绑定' : (S.integrations.qq.enabled ? '未绑定' : '未配置')}</span><span class="a"></span></div>
 
         <div class="gap"></div>
 
@@ -1218,7 +1326,9 @@ const MeScreen = {
         return;
       }
       sessionStorage.removeItem(STORE_KEY);
+      const integrations = S.integrations;
       S = blankState();
+      S.integrations = integrations;
       navStack.length = 0;
       location.hash = '#/register';
     };

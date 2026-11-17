@@ -43,7 +43,7 @@ def main() -> None:
     assert status == 200 and "text/html" in content_type
     assert b"app.js" in body
     status, _, app_body = request("/app.js")
-    assert status == 200 and b"APP_VER = '2.2.0'" in app_body
+    assert status == 200 and b"APP_VER = '2.3.0'" in app_body
     print("✓ static PWA")
 
     state = json_request("/api/auth/demo", "POST", {})

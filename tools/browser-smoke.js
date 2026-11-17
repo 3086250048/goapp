@@ -80,7 +80,7 @@ async function main() {
     error: !!document.querySelector('#__err'),
     nativeStatusHidden: getComputedStyle(document.querySelector('.statusbar')).display === 'none'
   })`);
-  if (home.version !== '2.2.0' || home.cards < 8 || home.fatal || home.error) {
+  if (home.version !== '2.3.0' || home.cards < 8 || home.fatal || home.error) {
     throw new Error(`首页未就绪: ${JSON.stringify(home)}`);
   }
   if (process.env.NATIVE_MODE === '1' && !home.nativeStatusHidden) {
@@ -137,6 +137,18 @@ async function main() {
     throw new Error(`订单列表异常: ${JSON.stringify(orders)}`);
   }
   console.log(`✓ 订单列表 ${orders.cards} 条`);
+
+  await evalJs(`location.hash = '#/address?from=home'`);
+  await sleep(700);
+  const address = await evalJs(`({
+    search: !!document.querySelector('#addrSearch'),
+    pois: document.querySelectorAll('.poi').length,
+    fatal: !!document.querySelector('#__fatal')
+  })`);
+  if (!address.search || address.pois < 1 || address.fatal) {
+    throw new Error(`地址页异常: ${JSON.stringify(address)}`);
+  }
+  console.log(`✓ 地址页高德降级 ${address.pois} 个备选地点`);
 
   if (errors.length) throw new Error(`浏览器错误: ${errors.join(' | ')}`);
   console.log(`截图目录 ${OUT}`);

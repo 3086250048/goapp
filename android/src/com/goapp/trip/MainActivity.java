@@ -78,7 +78,7 @@ public class MainActivity extends Activity {
         settings.setSupportMultipleWindows(false);
         settings.setMediaPlaybackRequiresUserGesture(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " GoappAndroid/2.2.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " GoappAndroid/2.3.0");
 
         CookieManager cookies = CookieManager.getInstance();
         cookies.setAcceptCookie(true);
@@ -119,6 +119,9 @@ public class MainActivity extends Activity {
             }
             return true;
         }
+        if (isOAuthHost(uri.getHost())) {
+            return false;
+        }
         if (sameHost(url, AppConfig.START_URL)) {
             return false;
         }
@@ -128,6 +131,14 @@ public class MainActivity extends Activity {
             // Keep the app responsive if no browser is installed.
         }
         return true;
+    }
+
+    private boolean isOAuthHost(String host) {
+        if (host == null) return false;
+        String normalized = host.toLowerCase();
+        return normalized.endsWith(".weixin.qq.com")
+                || normalized.equals("graph.qq.com")
+                || normalized.endsWith(".ptlogin2.qq.com");
     }
 
     private boolean sameHost(String first, String second) {

@@ -13,8 +13,8 @@ APP_URL=https://trip.example.com/ ./android/build-apk.sh
 产物：
 
 ```text
-dist/goapp-v2.2.0.apk
-dist/goapp-v2.2.0.apk.sha256
+dist/goapp-v2.3.0.apk
+dist/goapp-v2.3.0.apk.sha256
 ```
 
 首次构建会在 `.android-keys/` 生成独立签名密钥。该目录已被 Git 忽略；不要删除，否则后续 APK 无法覆盖安装旧版本，只能先卸载。

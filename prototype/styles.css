@@ -156,6 +156,7 @@ img{display:block;max-width:100%}
 }
 .oauth-btn.wx{background:#07C160}
 .oauth-btn.qq{background:#12B7F5}
+.oauth-btn.off{background:#C9CDD4;opacity:.72}
 .skip-demo{
   display:flex;align-items:center;justify-content:center;width:100%;height:46px;
   margin:22px 0 10px;border:1px solid var(--line);border-radius:23px;background:#fff;
@@ -242,6 +243,10 @@ img{display:block;max-width:100%}
   flex:1;height:42px;display:flex;align-items:center;gap:8px;padding:0 14px;
   background:#fff;border-radius:21px;box-shadow:0 4px 14px rgba(0,0,0,.1);font-size:13.5px;color:#B0B5BD;
 }
+.searchpill input{flex:1;height:100%;font-size:13px;color:var(--text)}
+.searchpill input::placeholder{color:#B0B5BD}
+.addr-search-btn{font-size:12px;font-weight:600;color:var(--orange);padding:5px 2px}
+.map-static{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .locate-btn{
   position:absolute;right:16px;bottom:calc(46% + 16px);z-index:20;
   width:42px;height:42px;border-radius:50%;background:#fff;box-shadow:0 4px 12px rgba(0,0,0,.14);

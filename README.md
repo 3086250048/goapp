@@ -61,7 +61,7 @@ DEMO_MODE=1 DEMO_OTP=123456 PORT=18080 python3 server/app.py
 |---|---|
 | `#/register` | ① 注册 |
 | `#/profile` | ② 用户画像 |
-| `#/address` | ③ 生活地址（地图选点占位） |
+| `#/address` | ③ 生活地址（高德搜索 / 定位 / 逆地理） |
 | `#/home` | 首页双列瀑布流 |
 | `#/detail/:tripId` | 目的地详情（时间轴 / 日期 / 人数） |
 | `#/checkout/:tripId` | 确认订单 |
@@ -75,6 +75,9 @@ DEMO_MODE=1 DEMO_OTP=123456 PORT=18080 python3 server/app.py
 **已实现**
 
 - 手机号验证码登录、HttpOnly 服务端会话、退出登录
+- 阿里云短信验证码适配器与体验验证码降级
+- 高德地点搜索、浏览器定位、逆地理编码和服务端静态地图
+- 微信网站应用 / QQ 互联 OAuth 授权码登录，首次授权后强制绑定手机号
 - 画像、地址、订单、凭证的 SQLite 持久化
 - 双列瀑布流、骨架屏、无限加载
 - 服务端权威价格：每人价 / 整团价 / 4 人 9 折 / 5 人 85 折 / 周末溢价
@@ -86,9 +89,8 @@ DEMO_MODE=1 DEMO_OTP=123456 PORT=18080 python3 server/app.py
 **未实现**
 
 - 真实图片：封面仍为渐变 + emoji 占位
-- 高德 API：地图、定位和 POI 为示意数据
 - 微信 / 支付宝真实支付：订单由服务端创建，但尚未接支付渠道回调
-- 短信服务商：默认使用固定体验验证码；上线真实用户前应关闭 `DEMO_MODE`
+- 微信移动端原生 SDK、QQ 移动端原生 SDK：当前 APK 使用 WebView OAuth；应用商店发布前应接原生 SDK
 - 开发者投放后台、退款审核流、分享/收藏/评价
 
 ## 目录
@@ -100,6 +102,7 @@ server/seed.json    从 data.js 导出的服务端权威行程内容
 tools/check.js      无浏览器渲染自检
 tools/api-smoke.py  已部署服务的 HTTP 全链路自检
 tools/browser-smoke.js 真实 Chromium 首页/下单/二维码回归
+tools/integrations-smoke.py 第三方服务配置与降级检查
 tools/probe.js      CDP 交互回归（需要 Chromium）
 Dockerfile          单容器生产镜像
 compose.yaml        本地/单机部署编排与数据卷
@@ -127,6 +130,49 @@ sudo ./deploy/deploy.sh
 ```
 
 域名、HTTPS、反向代理、数据备份和生产环境变量见 [deploy/README.md](deploy/README.md)。
+
+## 第三方服务接入
+
+真实能力通过服务器本地 `.env` 配置；未配置时对应按钮或接口会明确提示，不会伪造成功。
+
+阿里云短信：
+
+```dotenv
+SMS_PROVIDER=aliyun
+ALIYUN_ACCESS_KEY_ID=...
+ALIYUN_ACCESS_KEY_SECRET=...
+ALIYUN_SMS_SIGN_NAME=已审核签名
+ALIYUN_SMS_TEMPLATE_CODE=SMS_...
+```
+
+短信模板变量必须是 `{"code":"123456"}`。使用最小权限 RAM 用户，至少授予 `dysms:SendSms`。
+
+高德：
+
+```dotenv
+AMAP_WEB_SERVICE_KEY=高德Web服务Key
+```
+
+Key 只在服务端使用；前端通过同域接口搜索地点、逆地理编码和加载静态地图。
+
+微信 / QQ：
+
+```dotenv
+PUBLIC_BASE_URL=https://trip.example.com
+WECHAT_APP_ID=...
+WECHAT_APP_SECRET=...
+WECHAT_REDIRECT_URI=https://trip.example.com/api/auth/oauth/wechat/callback
+QQ_APP_ID=...
+QQ_APP_SECRET=...
+QQ_REDIRECT_URI=https://trip.example.com/api/auth/oauth/qq/callback
+```
+
+两个回调地址必须分别在微信开放平台与 QQ 互联中登记。OAuth 首次登录会要求手机号验证码，完成绑定后才建立正式用户会话。正式环境必须使用 HTTPS。
+
+官方接入参考：[阿里云 SendSms](https://help.aliyun.com/zh/sms/developer-reference/api-dysmsapi-2017-05-25-sendsms)、
+[微信网站应用登录](https://developers.weixin.qq.com/doc/oplatform/Website_App/WeChat_Login/Authorized_Interface_Calling_UnionID.html)、
+[QQ OAuth2.0](https://wiki.connect.qq.com/%e4%bd%bf%e7%94%a8authorization_code%e8%8e%b7%e5%8f%96access_token/)、
+[高德 POI 搜索 2.0](https://lbs.amap.com/api/webservice/guide/api-advanced/newpoisearch)。
 
 ## Android APK
 

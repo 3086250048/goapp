@@ -20,7 +20,9 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, unquote, urlsplit
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
+from urllib.request import Request, urlopen
 
 import segno
 
@@ -28,7 +30,7 @@ import segno
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "prototype"
 ADMIN_STATIC_DIR = BASE_DIR / "admin"
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 SEED_FILE = Path(__file__).resolve().with_name("seed.json")
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
 DB_FILE = DATA_DIR / "goapp.sqlite3"
@@ -38,8 +40,23 @@ DEMO_OTP = os.getenv("DEMO_OTP", "123456" if DEMO_MODE else "")
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+SMS_PROVIDER = os.getenv("SMS_PROVIDER", "demo").strip().lower()
+ALIYUN_ACCESS_KEY_ID = os.getenv("ALIYUN_ACCESS_KEY_ID", "")
+ALIYUN_ACCESS_KEY_SECRET = os.getenv("ALIYUN_ACCESS_KEY_SECRET", "")
+ALIYUN_SMS_SIGN_NAME = os.getenv("ALIYUN_SMS_SIGN_NAME", "")
+ALIYUN_SMS_TEMPLATE_CODE = os.getenv("ALIYUN_SMS_TEMPLATE_CODE", "")
+AMAP_WEB_SERVICE_KEY = os.getenv("AMAP_WEB_SERVICE_KEY", "")
+WECHAT_APP_ID = os.getenv("WECHAT_APP_ID", "")
+WECHAT_APP_SECRET = os.getenv("WECHAT_APP_SECRET", "")
+WECHAT_REDIRECT_URI = os.getenv("WECHAT_REDIRECT_URI", "")
+QQ_APP_ID = os.getenv("QQ_APP_ID", "")
+QQ_APP_SECRET = os.getenv("QQ_APP_SECRET", "")
+QQ_REDIRECT_URI = os.getenv("QQ_REDIRECT_URI", "")
 SESSION_DAYS = 30
 ADMIN_SESSION_HOURS = 12
+OAUTH_STATE_MINUTES = 10
+OAUTH_PENDING_MINUTES = 15
 OTP_MINUTES = 10
 PHONE_RE = re.compile(r"^1[3-9]\d{9}$")
 
@@ -215,6 +232,42 @@ def initialize_database() -> None:
 
                 CREATE INDEX IF NOT EXISTS idx_admin_audit_created
                     ON admin_audit(created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS oauth_identities (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL,
+                    openid TEXT NOT NULL,
+                    unionid TEXT,
+                    nickname TEXT,
+                    avatar_url TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(provider, openid)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_oauth_identity_user
+                    ON oauth_identities(user_id, provider);
+
+                CREATE TABLE IF NOT EXISTS oauth_states (
+                    state_hash TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL,
+                    return_to TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS oauth_pending (
+                    token_hash TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL,
+                    openid TEXT NOT NULL,
+                    unionid TEXT,
+                    nickname TEXT,
+                    avatar_url TEXT,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    UNIQUE(provider, openid)
+                );
                 """
             )
             trip_columns = {
@@ -224,6 +277,14 @@ def initialize_database() -> None:
                 conn.execute(
                     "ALTER TABLE trips ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0"
                 )
+            address_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(addresses)").fetchall()
+            }
+            if "longitude" not in address_columns:
+                conn.execute("ALTER TABLE addresses ADD COLUMN longitude REAL")
+            if "latitude" not in address_columns:
+                conn.execute("ALTER TABLE addresses ADD COLUMN latitude REAL")
             updated_at = now_iso()
             for sort_order, trip in enumerate(SEED["TRIPS"]):
                 conn.execute(
@@ -405,6 +466,90 @@ def trip_stats(trip: dict, people: int) -> dict:
     }
 
 
+def sms_configured() -> bool:
+    if SMS_PROVIDER == "demo":
+        return DEMO_MODE
+    if SMS_PROVIDER == "aliyun":
+        return all(
+            (
+                ALIYUN_ACCESS_KEY_ID,
+                ALIYUN_ACCESS_KEY_SECRET,
+                ALIYUN_SMS_SIGN_NAME,
+                ALIYUN_SMS_TEMPLATE_CODE,
+            )
+        )
+    return False
+
+
+def oauth_provider_configured(provider: str) -> bool:
+    if provider == "wechat":
+        return bool(WECHAT_APP_ID and WECHAT_APP_SECRET)
+    if provider == "qq":
+        return bool(QQ_APP_ID and QQ_APP_SECRET)
+    return False
+
+
+def amap_configured() -> bool:
+    return bool(AMAP_WEB_SERVICE_KEY)
+
+
+def http_json(url: str, params: dict, timeout: int = 12) -> dict:
+    request = Request(
+        f"{url}?{urlencode(params)}",
+        headers={"Accept": "application/json", "User-Agent": "Goapp/2.3"},
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise ValueError(f"第三方服务请求失败：{exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("第三方服务返回格式错误")
+    return payload
+
+
+def send_aliyun_sms(phone: str, code: str, out_id: str) -> None:
+    try:
+        from alibabacloud_dysmsapi20170525 import models as sms_models
+        from alibabacloud_dysmsapi20170525.client import Client as SmsClient
+        from alibabacloud_tea_openapi import models as open_api_models
+        from alibabacloud_tea_util import models as util_models
+
+        config = open_api_models.Config(
+            access_key_id=ALIYUN_ACCESS_KEY_ID,
+            access_key_secret=ALIYUN_ACCESS_KEY_SECRET,
+        )
+        config.endpoint = "dysmsapi.aliyuncs.com"
+        client = SmsClient(config)
+        request = sms_models.SendSmsRequest(
+            phone_numbers=phone,
+            sign_name=ALIYUN_SMS_SIGN_NAME,
+            template_code=ALIYUN_SMS_TEMPLATE_CODE,
+            template_param=json.dumps({"code": code}, separators=(",", ":")),
+            out_id=out_id[:64],
+        )
+        response = client.send_sms_with_options(request, util_models.RuntimeOptions())
+        if response.body.code != "OK":
+            raise ValueError(response.body.message or "短信发送失败")
+    except ImportError as exc:
+        raise ValueError("阿里云短信 SDK 未安装") from exc
+    except Exception as exc:
+        raise ValueError(f"短信服务请求失败：{exc}") from exc
+
+
+def public_integrations() -> dict:
+    return {
+        "sms": {
+            "provider": SMS_PROVIDER,
+            "enabled": sms_configured(),
+            "demo": SMS_PROVIDER == "demo" and DEMO_MODE,
+        },
+        "amap": {"enabled": amap_configured()},
+        "wechat": {"enabled": oauth_provider_configured("wechat")},
+        "qq": {"enabled": oauth_provider_configured("qq")},
+    }
+
+
 def iso_or_blank(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -484,7 +629,11 @@ class AppHandler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         if headers:
             for key, value in headers.items():
-                self.send_header(key, value)
+                if isinstance(value, (list, tuple)):
+                    for item in value:
+                        self.send_header(key, item)
+                else:
+                    self.send_header(key, value)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -600,6 +749,462 @@ class AppHandler(BaseHTTPRequestHandler):
             parts.append("Secure")
         return "; ".join(parts)
 
+    def external_base_url(self) -> str:
+        if PUBLIC_BASE_URL:
+            return PUBLIC_BASE_URL
+        host = self.headers.get("Host", "").strip()
+        proto = self.headers.get("X-Forwarded-Proto", "").split(",")[0].strip()
+        if not proto:
+            proto = "https" if host and not host.startswith(("127.", "localhost")) else "http"
+        return f"{proto}://{host}" if host else "http://127.0.0.1"
+
+    def oauth_redirect_uri(self, provider: str) -> str:
+        configured = WECHAT_REDIRECT_URI if provider == "wechat" else QQ_REDIRECT_URI
+        return configured or (
+            f"{self.external_base_url()}/api/auth/oauth/{provider}/callback"
+        )
+
+    def send_redirect(self, location: str, cookies: list[str] | None = None) -> None:
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", location)
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        for cookie in cookies or []:
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+
+    def oauth_start(self, conn: sqlite3.Connection, provider: str) -> None:
+        if not oauth_provider_configured(provider):
+            name = "微信" if provider == "wechat" else "QQ"
+            self.send_json({"error": f"{name}登录尚未配置"}, 503)
+            return
+        return_to = self.query_value("return_to", "/")
+        if not return_to.startswith("/") or return_to.startswith("//"):
+            return_to = "/"
+        state = secrets.token_urlsafe(32)
+        now = datetime.now(timezone.utc)
+        conn.execute(
+            """
+            INSERT INTO oauth_states(
+                state_hash, provider, return_to, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                hash_token(state),
+                provider,
+                return_to,
+                now.replace(microsecond=0).isoformat(),
+                (now + timedelta(minutes=OAUTH_STATE_MINUTES))
+                .replace(microsecond=0)
+                .isoformat(),
+            ),
+        )
+        conn.commit()
+        redirect_uri = self.oauth_redirect_uri(provider)
+        if provider == "wechat":
+            params = {
+                "appid": WECHAT_APP_ID,
+                "redirect_uri": redirect_uri,
+                "response_type": "code",
+                "scope": "snsapi_login",
+                "state": state,
+            }
+            url = (
+                "https://open.weixin.qq.com/connect/qrconnect?"
+                + urlencode(params)
+                + "#wechat_redirect"
+            )
+        else:
+            params = {
+                "response_type": "code",
+                "client_id": QQ_APP_ID,
+                "redirect_uri": redirect_uri,
+                "state": state,
+                "scope": "get_user_info",
+                "display": "mobile",
+            }
+            url = "https://graph.qq.com/oauth2.0/authorize?" + urlencode(params)
+        self.send_redirect(url)
+
+    def exchange_wechat_identity(self, code: str) -> dict:
+        token = http_json(
+            "https://api.weixin.qq.com/sns/oauth2/access_token",
+            {
+                "appid": WECHAT_APP_ID,
+                "secret": WECHAT_APP_SECRET,
+                "code": code,
+                "grant_type": "authorization_code",
+            },
+        )
+        if token.get("errcode"):
+            raise ValueError(token.get("errmsg") or "微信授权失败")
+        openid = str(token.get("openid", ""))
+        if not openid:
+            raise ValueError("微信未返回 openid")
+        profile = http_json(
+            "https://api.weixin.qq.com/sns/userinfo",
+            {
+                "access_token": token["access_token"],
+                "openid": openid,
+                "lang": "zh_CN",
+            },
+        )
+        if profile.get("errcode"):
+            raise ValueError(profile.get("errmsg") or "微信用户信息获取失败")
+        return {
+            "openid": openid,
+            "unionid": token.get("unionid") or profile.get("unionid"),
+            "nickname": profile.get("nickname") or "",
+            "avatar": profile.get("headimgurl") or "",
+        }
+
+    def exchange_qq_identity(self, code: str) -> dict:
+        token = http_json(
+            "https://graph.qq.com/oauth2.0/token",
+            {
+                "grant_type": "authorization_code",
+                "client_id": QQ_APP_ID,
+                "client_secret": QQ_APP_SECRET,
+                "code": code,
+                "redirect_uri": self.oauth_redirect_uri("qq"),
+                "fmt": "json",
+            },
+        )
+        if token.get("error"):
+            raise ValueError(token.get("error_description") or "QQ 授权失败")
+        access_token = str(token.get("access_token", ""))
+        if not access_token:
+            raise ValueError("QQ 未返回 access_token")
+        identity = http_json(
+            "https://graph.qq.com/oauth2.0/me",
+            {"access_token": access_token, "fmt": "json"},
+        )
+        openid = str(identity.get("openid", ""))
+        if not openid:
+            raise ValueError("QQ 未返回 openid")
+        profile = http_json(
+            "https://graph.qq.com/user/get_user_info",
+            {
+                "access_token": access_token,
+                "oauth_consumer_key": QQ_APP_ID,
+                "openid": openid,
+            },
+        )
+        if profile.get("ret") not in (0, "0", None):
+            raise ValueError(profile.get("msg") or "QQ 用户信息获取失败")
+        return {
+            "openid": openid,
+            "unionid": None,
+            "nickname": profile.get("nickname") or "",
+            "avatar": profile.get("figureurl_qq_2") or "",
+        }
+
+    def oauth_callback(self, conn: sqlite3.Connection, provider: str) -> None:
+        if self.query_value("error"):
+            self.send_redirect("/?oauth=error#/register")
+            return
+        state = self.query_value("state")
+        code = self.query_value("code")
+        state_row = conn.execute(
+            "SELECT * FROM oauth_states WHERE state_hash = ? AND provider = ?",
+            (hash_token(state), provider),
+        ).fetchone()
+        if (
+            not state_row
+            or state_row["expires_at"] <= now_iso()
+            or not code
+            or not oauth_provider_configured(provider)
+        ):
+            self.send_redirect("/?oauth=invalid#/register")
+            return
+        conn.execute(
+            "DELETE FROM oauth_states WHERE state_hash = ?",
+            (state_row["state_hash"],),
+        )
+        try:
+            identity = (
+                self.exchange_wechat_identity(code)
+                if provider == "wechat"
+                else self.exchange_qq_identity(code)
+            )
+        except ValueError as exc:
+            print(f"OAuth {provider} failed: {exc}", flush=True)
+            conn.commit()
+            self.send_redirect("/?oauth=error#/register")
+            return
+        linked = conn.execute(
+            "SELECT * FROM oauth_identities WHERE provider = ? AND openid = ?",
+            (provider, identity["openid"]),
+        ).fetchone()
+        if linked:
+            conn.execute(
+                """
+                UPDATE oauth_identities SET unionid = ?, nickname = ?,
+                    avatar_url = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    identity.get("unionid"),
+                    identity.get("nickname"),
+                    identity.get("avatar"),
+                    now_iso(),
+                    linked["id"],
+                ),
+            )
+            user = conn.execute(
+                "SELECT * FROM users WHERE id = ?", (linked["user_id"],)
+            ).fetchone()
+            token, cookie = self.create_session(conn, user["id"])
+            conn.commit()
+            self.send_redirect("/?oauth=ok#/home", [cookie])
+            return
+        pending_token = secrets.token_urlsafe(32)
+        expires = datetime.now(timezone.utc) + timedelta(minutes=OAUTH_PENDING_MINUTES)
+        conn.execute(
+            """
+            INSERT INTO oauth_pending(
+                token_hash, provider, openid, unionid, nickname,
+                avatar_url, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(provider, openid) DO UPDATE SET
+                token_hash = excluded.token_hash,
+                unionid = excluded.unionid,
+                nickname = excluded.nickname,
+                avatar_url = excluded.avatar_url,
+                created_at = excluded.created_at,
+                expires_at = excluded.expires_at
+            """,
+            (
+                hash_token(pending_token),
+                provider,
+                identity["openid"],
+                identity.get("unionid"),
+                identity.get("nickname"),
+                identity.get("avatar"),
+                now_iso(),
+                expires.replace(microsecond=0).isoformat(),
+            ),
+        )
+        conn.commit()
+        parts = [
+            f"goapp_oauth_pending={pending_token}",
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Lax",
+            f"Max-Age={OAUTH_PENDING_MINUTES * 60}",
+        ]
+        if COOKIE_SECURE:
+            parts.append("Secure")
+        self.send_redirect("/?oauth=bind#/register", ["; ".join(parts)])
+
+    def bind_pending_oauth(
+        self, conn: sqlite3.Connection, user: sqlite3.Row
+    ) -> str | None:
+        morsel = self.cookies().get("goapp_oauth_pending")
+        if not morsel:
+            return None
+        pending = conn.execute(
+            """
+            SELECT * FROM oauth_pending
+            WHERE token_hash = ? AND expires_at > ?
+            """,
+            (hash_token(morsel.value), now_iso()),
+        ).fetchone()
+        if not pending:
+            return None
+        linked = conn.execute(
+            """
+            SELECT * FROM oauth_identities
+            WHERE provider = ? AND openid = ?
+            """,
+            (pending["provider"], pending["openid"]),
+        ).fetchone()
+        now = now_iso()
+        if not linked:
+            conn.execute(
+                """
+                INSERT INTO oauth_identities(
+                    id, user_id, provider, openid, unionid, nickname,
+                    avatar_url, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    uuid.uuid4().hex,
+                    user["id"],
+                    pending["provider"],
+                    pending["openid"],
+                    pending["unionid"],
+                    pending["nickname"],
+                    pending["avatar_url"],
+                    now,
+                    now,
+                ),
+            )
+        elif linked["user_id"] == user["id"]:
+            conn.execute(
+                """
+                UPDATE oauth_identities SET unionid = ?, nickname = ?,
+                    avatar_url = ?, updated_at = ? WHERE id = ?
+                """,
+                (
+                    pending["unionid"],
+                    pending["nickname"],
+                    pending["avatar_url"],
+                    now,
+                    linked["id"],
+                ),
+            )
+        conn.execute(
+            "DELETE FROM oauth_pending WHERE token_hash = ?",
+            (hash_token(morsel.value),),
+        )
+        parts = [
+            "goapp_oauth_pending=",
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Lax",
+            "Max-Age=0",
+        ]
+        if COOKIE_SECURE:
+            parts.append("Secure")
+        return "; ".join(parts)
+
+    def location_search(self, conn: sqlite3.Connection) -> None:
+        if not self.require_user(conn):
+            return
+        if not amap_configured():
+            self.send_json({"error": "高德地图尚未配置"}, 503)
+            return
+        keywords = self.query_value("keywords").strip()
+        if not keywords:
+            self.send_json({"error": "请输入地点关键词"}, 400)
+            return
+        params = {
+            "key": AMAP_WEB_SERVICE_KEY,
+            "keywords": keywords,
+            "city_limit": "false",
+            "page_size": "20",
+            "page_num": "1",
+        }
+        city = self.query_value("city").strip()
+        if city:
+            params["region"] = city
+        payload = http_json("https://restapi.amap.com/v5/place/text", params)
+        if payload.get("status") != "1":
+            self.send_json({"error": payload.get("info") or "高德地点搜索失败"}, 502)
+            return
+        self.send_json(
+            {
+                "items": [
+                    {
+                        "id": poi.get("id", ""),
+                        "name": poi.get("name", ""),
+                        "address": poi.get("address", ""),
+                        "district": poi.get("adname", ""),
+                        "city": poi.get("cityname", ""),
+                        "location": poi.get("location", ""),
+                        "distance": poi.get("distance", ""),
+                        "type": poi.get("type", ""),
+                    }
+                    for poi in payload.get("pois", [])
+                ]
+            }
+        )
+
+    def amap_gcj_location(self, longitude: str, latitude: str, coordsys: str) -> str:
+        location = f"{longitude},{latitude}"
+        if coordsys != "gps":
+            return location
+        payload = http_json(
+            "https://restapi.amap.com/v3/assistant/coordinate/convert",
+            {
+                "key": AMAP_WEB_SERVICE_KEY,
+                "locations": location,
+                "coordsys": "gps",
+            },
+        )
+        if payload.get("status") != "1":
+            raise ValueError(payload.get("info") or "坐标转换失败")
+        return str(payload.get("locations") or location)
+
+    def location_reverse(self, conn: sqlite3.Connection) -> None:
+        if not self.require_user(conn):
+            return
+        if not amap_configured():
+            self.send_json({"error": "高德地图尚未配置"}, 503)
+            return
+        longitude = self.query_value("lng")
+        latitude = self.query_value("lat")
+        if not re.fullmatch(r"-?\d+(?:\.\d+)?", longitude) or not re.fullmatch(
+            r"-?\d+(?:\.\d+)?", latitude
+        ):
+            self.send_json({"error": "经纬度格式错误"}, 400)
+            return
+        try:
+            location = self.amap_gcj_location(
+                longitude, latitude, self.query_value("coordsys", "gcj")
+            )
+        except ValueError as exc:
+            self.send_json({"error": str(exc)}, 502)
+            return
+        payload = http_json(
+            "https://restapi.amap.com/v3/geocode/regeo",
+            {
+                "key": AMAP_WEB_SERVICE_KEY,
+                "location": location,
+                "extensions": "base",
+            },
+        )
+        if payload.get("status") != "1":
+            self.send_json({"error": payload.get("info") or "逆地理编码失败"}, 502)
+            return
+        regeocode = payload.get("regeocode") or {}
+        address = regeocode.get("formatted_address") or ""
+        self.send_json(
+            {
+                "address": address,
+                "location": location,
+                "pois": (regeocode.get("pois") or [])[:8],
+            }
+        )
+
+    def location_static(self, conn: sqlite3.Connection) -> None:
+        if not self.require_user(conn):
+            return
+        if not amap_configured():
+            self.send_json({"error": "高德地图尚未配置"}, 503)
+            return
+        longitude = self.query_value("lng")
+        latitude = self.query_value("lat")
+        if not re.fullmatch(r"-?\d+(?:\.\d+)?", longitude) or not re.fullmatch(
+            r"-?\d+(?:\.\d+)?", latitude
+        ):
+            self.send_json({"error": "经纬度格式错误"}, 400)
+            return
+        params = {
+            "key": AMAP_WEB_SERVICE_KEY,
+            "location": f"{longitude},{latitude}",
+            "zoom": "15",
+            "size": "750*700",
+            "scale": "2",
+            "traffic": "0",
+        }
+        request = Request(
+            "https://restapi.amap.com/v3/staticmap?" + urlencode(params),
+            headers={"User-Agent": "Goapp/2.3"},
+        )
+        try:
+            with urlopen(request, timeout=12) as response:
+                content_type = response.headers.get("Content-Type", "image/png")
+                body = response.read()
+        except (HTTPError, URLError, TimeoutError) as exc:
+            self.send_json({"error": f"高德地图加载失败：{exc}"}, 502)
+            return
+        if not content_type.startswith("image/"):
+            self.send_json({"error": "高德地图返回异常"}, 502)
+            return
+        self.send_bytes(body, content_type, cache="private, no-store")
+
     def handle_api(self, method: str, path: str) -> None:
         conn = db()
         try:
@@ -608,6 +1213,17 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             if method == "GET" and path == "/api/health":
                 self.send_json({"ok": True, "database": "sqlite", "version": APP_VERSION})
+                return
+            if method == "GET" and path == "/api/public-config":
+                self.send_json({"integrations": public_integrations()})
+                return
+            oauth_start = re.fullmatch(r"/api/auth/oauth/(wechat|qq)/start", path)
+            if method == "GET" and oauth_start:
+                self.oauth_start(conn, oauth_start.group(1))
+                return
+            oauth_callback = re.fullmatch(r"/api/auth/oauth/(wechat|qq)/callback", path)
+            if method == "GET" and oauth_callback:
+                self.oauth_callback(conn, oauth_callback.group(1))
                 return
             if method == "GET" and path == "/api/bootstrap":
                 self.get_bootstrap(conn)
@@ -639,6 +1255,15 @@ class AppHandler(BaseHTTPRequestHandler):
             if method == "POST" and path == "/api/orders":
                 self.create_order(conn)
                 return
+            if method == "GET" and path == "/api/location/search":
+                self.location_search(conn)
+                return
+            if method == "GET" and path == "/api/location/reverse":
+                self.location_reverse(conn)
+                return
+            if method == "GET" and path == "/api/location/static":
+                self.location_static(conn)
+                return
             voucher_match = re.fullmatch(r"/api/vouchers/([^/]+)/qr\.svg", path)
             if method == "GET" and voucher_match:
                 self.send_voucher_qr(conn, voucher_match.group(1))
@@ -657,7 +1282,13 @@ class AppHandler(BaseHTTPRequestHandler):
         user = self.current_user(conn)
         catalog = self.catalog(conn)
         if not user:
-            self.send_json({"auth": False, "catalog": catalog})
+            self.send_json(
+                {
+                    "auth": False,
+                    "catalog": catalog,
+                    "integrations": public_integrations(),
+                }
+            )
             return
         self.send_json(
             {
@@ -668,6 +1299,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 "orders": self.serialize_orders(conn, user["id"]),
                 "lastChannel": "wechat",
                 "demo": DEMO_MODE,
+                "integrations": public_integrations(),
+                "oauthBindings": self.oauth_bindings(conn, user["id"]),
             }
         )
 
@@ -690,6 +1323,15 @@ class AppHandler(BaseHTTPRequestHandler):
             "taxonomy": taxonomy_from_db(conn),
         }
 
+    def oauth_bindings(self, conn: sqlite3.Connection, user_id: str) -> list[str]:
+        return [
+            row["provider"]
+            for row in conn.execute(
+                "SELECT DISTINCT provider FROM oauth_identities WHERE user_id = ?",
+                (user_id,),
+            ).fetchall()
+        ]
+
     def serialize_addresses(self, conn: sqlite3.Connection, user_id: str) -> list[dict]:
         rows = conn.execute(
             """
@@ -706,6 +1348,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 "address": row["address"],
                 "detail": row["detail"],
                 "isDefault": bool(row["is_default"]),
+                "longitude": row["longitude"],
+                "latitude": row["latitude"],
             }
             for row in rows
         ]
@@ -773,9 +1417,14 @@ class AppHandler(BaseHTTPRequestHandler):
         return active + inactive
 
     def state_response(
-        self, conn: sqlite3.Connection, user: sqlite3.Row, cookie: str | None = None
+        self,
+        conn: sqlite3.Connection,
+        user: sqlite3.Row,
+        cookie: str | None = None,
+        extra_cookies: list[str] | None = None,
     ) -> None:
-        headers = {"Set-Cookie": cookie} if cookie else None
+        cookies = ([cookie] if cookie else []) + (extra_cookies or [])
+        headers = {"Set-Cookie": cookies} if cookies else None
         self.send_json(
             {
                 "auth": True,
@@ -785,6 +1434,8 @@ class AppHandler(BaseHTTPRequestHandler):
                 "orders": self.serialize_orders(conn, user["id"]),
                 "lastChannel": "wechat",
                 "demo": DEMO_MODE,
+                "integrations": public_integrations(),
+                "oauthBindings": self.oauth_bindings(conn, user["id"]),
             },
             headers=headers,
         )
@@ -794,6 +1445,12 @@ class AppHandler(BaseHTTPRequestHandler):
         phone = str(body.get("phone", "")).strip()
         if not PHONE_RE.fullmatch(phone):
             self.send_json({"error": "请输入正确的 11 位手机号"}, 400)
+            return
+        if not sms_configured():
+            self.send_json(
+                {"error": "短信服务尚未配置，请联系管理员完成实名短信接入"},
+                503,
+            )
             return
         recent = conn.execute(
             """
@@ -807,7 +1464,11 @@ class AppHandler(BaseHTTPRequestHandler):
             if datetime.now(timezone.utc) - created < timedelta(seconds=60):
                 self.send_json({"error": "验证码发送过于频繁，请稍后再试"}, 429)
                 return
-        code = DEMO_OTP if DEMO_MODE else f"{secrets.randbelow(1_000_000):06d}"
+        code = (
+            DEMO_OTP
+            if SMS_PROVIDER == "demo"
+            else f"{secrets.randbelow(1_000_000):06d}"
+        )
         challenge_id = uuid.uuid4().hex
         created_at = datetime.now(timezone.utc)
         expires_at = created_at + timedelta(minutes=OTP_MINUTES)
@@ -824,9 +1485,17 @@ class AppHandler(BaseHTTPRequestHandler):
                 expires_at.replace(microsecond=0).isoformat(),
             ),
         )
+        if SMS_PROVIDER == "aliyun":
+            try:
+                send_aliyun_sms(phone, code, challenge_id)
+            except ValueError as exc:
+                conn.rollback()
+                print(f"Aliyun SMS failed: {type(exc).__name__}", flush=True)
+                self.send_json({"error": "验证码发送失败，请稍后重试"}, 502)
+                return
         conn.commit()
         response = {"ok": True, "expiresIn": OTP_MINUTES * 60}
-        if DEMO_MODE:
+        if SMS_PROVIDER == "demo" and DEMO_MODE:
             response["demoCode"] = code
         self.send_json(response)
 
@@ -877,8 +1546,14 @@ class AppHandler(BaseHTTPRequestHandler):
             )
             user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         token, cookie = self.create_session(conn, user["id"])
+        pending_cookie = self.bind_pending_oauth(conn, user)
         conn.commit()
-        self.state_response(conn, user, cookie)
+        self.state_response(
+            conn,
+            user,
+            cookie,
+            [pending_cookie] if pending_cookie else None,
+        )
 
     def demo_login(self, conn: sqlite3.Connection) -> None:
         if not DEMO_MODE:
@@ -1062,6 +1737,14 @@ class AppHandler(BaseHTTPRequestHandler):
         name = str(body.get("name", "")).strip()[:80]
         line = str(body.get("address", "")).strip()[:180]
         detail = str(body.get("detail", "")).strip()[:120]
+        longitude = body.get("longitude")
+        latitude = body.get("latitude")
+        try:
+            longitude = float(longitude) if longitude not in (None, "") else None
+            latitude = float(latitude) if latitude not in (None, "") else None
+        except (TypeError, ValueError):
+            self.send_json({"error": "地址坐标格式错误"}, 400)
+            return
         if not name or not line:
             self.send_json({"error": "地址信息不完整"}, 400)
             return
@@ -1077,9 +1760,21 @@ class AppHandler(BaseHTTPRequestHandler):
             """
             INSERT INTO addresses(
                 id, user_id, tag, name, address, detail, is_default, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                , longitude, latitude
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (address_id, user["id"], tag, name, line, detail, is_default, now_iso()),
+            (
+                address_id,
+                user["id"],
+                tag,
+                name,
+                line,
+                detail,
+                is_default,
+                now_iso(),
+                longitude,
+                latitude,
+            ),
         )
         conn.commit()
         self.state_response(conn, user)

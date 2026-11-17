@@ -1,1 +1,2 @@
 segno==1.6.6
+alibabacloud_dysmsapi20170525==4.6.0

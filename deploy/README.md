@@ -49,7 +49,7 @@ sudo ./deploy/deploy.sh --domain trip.example.com
 首次部署完成后检查：
 
 ```json
-{"ok":true,"database":"sqlite","version":"2.2.0"}
+{"ok":true,"database":"sqlite","version":"2.3.0"}
 ```
 
 ## 2. 环境变量
@@ -63,10 +63,22 @@ sudo ./deploy/deploy.sh --domain trip.example.com
 | `DEMO_OTP` | `123456` | 体验验证码 |
 | `ADMIN_USERNAME` | `admin` | 管理后台账号 |
 | `ADMIN_PASSWORD` | 自动生成 | 管理后台密码；首次生成后重复部署会保留 |
+| `SMS_PROVIDER` | `demo` | `demo` 或 `aliyun` |
+| `ALIYUN_ACCESS_KEY_ID` | 空 | 阿里云 RAM AccessKey ID |
+| `ALIYUN_ACCESS_KEY_SECRET` | 空 | 阿里云 RAM AccessKey Secret |
+| `ALIYUN_SMS_SIGN_NAME` | 空 | 已审核短信签名 |
+| `ALIYUN_SMS_TEMPLATE_CODE` | 空 | 验证码模板 Code，变量为 `code` |
+| `AMAP_WEB_SERVICE_KEY` | 空 | 高德 Web 服务 Key，仅服务端使用 |
+| `PUBLIC_BASE_URL` | 域名 | OAuth 回调使用的公网 Origin |
+| `WECHAT_APP_ID/SECRET` | 空 | 微信开放平台网站应用凭据 |
+| `WECHAT_REDIRECT_URI` | 空 | 通常为 `https://域名/api/auth/oauth/wechat/callback` |
+| `QQ_APP_ID/SECRET` | 空 | QQ 互联网站应用凭据 |
+| `QQ_REDIRECT_URI` | 空 | 通常为 `https://域名/api/auth/oauth/qq/callback` |
 | `COOKIE_SECURE` | `0` | 正式 HTTPS 部署设为 `1` |
 | `CADDY_IMAGE` | `caddy:2.10-alpine` | 可替换为内网镜像仓库地址 |
 
 脚本每次部署都会根据命令行参数重建项目根目录的 `.env`。`.env` 已加入 `.gitignore`，不能提交。
+完整变量模板见 [`deploy/env.example`](env.example)。
 
 显式指定管理员凭据：
 
@@ -102,7 +114,9 @@ volumes:
   goapp-data:
 ```
 
-`DEMO_MODE=0` 时，验证码只写入 `otp_challenges` 表，不会返回给浏览器，也不会打印到日志。接入短信服务商时需要把服务端生成的验证码交给短信 SDK；当前仓库没有虚构第三方短信接入。
+`SMS_PROVIDER=aliyun` 时，验证码通过阿里云官方 Python SDK 发送，服务端和日志都不会返回验证码。只有 `SMS_PROVIDER=demo` 且 `DEMO_MODE=1` 才会返回体验验证码。
+
+第三方密钥首次写入 `.env` 后，一键部署会保留这些值。修改后重复执行原部署命令即可生效。
 
 ## 3. 内置 Caddy + 自动 HTTPS
 
