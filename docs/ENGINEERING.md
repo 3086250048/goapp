@@ -29,6 +29,8 @@
 | 截图（390×844 @2x） | `node tools/shot.js` → `.shots/` |
 | 重生成 PWA 图标 | `python tools/make_icons.py`（需 Pillow） |
 | 重生成服务端种子 | `node tools/export-seed.js` |
+| 一键部署 / 更新 | `./deploy/deploy.sh --remote user@host --domain trip.example.com` |
+| 部署配置自检 | `./tools/check-deploy.sh` |
 
 两点注意：
 
@@ -52,7 +54,7 @@ server/
 ├── seed.json           服务端权威画像与行程内容
 └── requirements.txt    仅 segno 一个运行依赖
 
-deploy/                 反向代理配置与运维手册
+deploy/                 一键部署脚本、Caddy 配置与运维手册
 tools/                  自检 / HTTP 探针 / 回归 / 图标 / 种子导出
 Dockerfile              生产镜像
 compose.yaml            单机编排与持久化数据卷
@@ -133,6 +135,7 @@ docs/                   文档
 7. `.shots/` 已在 `.gitignore`；不要提交截图。
 8. **不要提交 `.env` 或任何密钥。**
 9. **每次改动必须提交并同步到远端。** 仓库带 `post-commit` 钩子自动 push；每个新克隆执行一次 `git config core.hooksPath tools/githooks`（Windows 上跑 `.\tools\install-hooks.ps1`）。
+10. **部署组件与一键脚本必须同步。** 改 Dockerfile、Compose、服务名、端口、环境变量、数据卷、健康检查、启动命令或反向代理时，同一次提交必须更新 `deploy/deploy.sh` 并运行 `./tools/check-deploy.sh`。
 
 ## 新增一个页面
 
@@ -197,11 +200,12 @@ git config core.hooksPath tools/githooks       # Linux / macOS / Git Bash
 见 [deploy/README.md](../deploy/README.md)。
 
 ```bash
-docker compose up -d --build
+./deploy/deploy.sh --remote user@host --domain trip.example.com
 ```
 
-- 应用和 SQLite 同容器运行，数据在 `goapp-data` 命名卷
-- Caddy / nginx 只做 HTTPS 反向代理到 `127.0.0.1:18080`
+- 应用和 SQLite 同容器运行，数据在 `goapp_goapp-data` 命名卷
+- 带域名时由 Compose `https` profile 启动 Caddy，反向代理到 `goapp:8080`
+- 不带域名时只绑定 `127.0.0.1:18080`，可接已有 nginx
 - `DEMO_MODE=1` 用于体验环境；接真实短信后设 `DEMO_MODE=0`
 - 重建容器不会丢数据；禁止随意 `docker compose down -v`
 

@@ -1,35 +1,59 @@
 # 部署与运维
 
-当前架构是单容器应用：Python 同时提供 PWA 静态文件和 `/api/*`，SQLite 数据保存在 Docker 命名卷 `goapp-data`。生产环境只需把 HTTPS 反向代理指向容器端口。
+当前架构是 Python + SQLite 应用容器，可选择内置 Caddy 自动 HTTPS。SQLite 数据保存在 Docker 命名卷 `goapp_goapp-data`。唯一部署入口是 `deploy/deploy.sh`。
 
-## 1. 服务器准备
+## 1. 一键部署
 
-Ubuntu 22.04 / Debian 12，1 核 1 GB 可运行。安装 Docker 与 Compose 后：
+目标机支持 Ubuntu 22.04 / Debian 12，建议至少 1 核 1 GB。系统会由脚本自动安装 Docker、Docker Compose 和基础依赖。
+
+从开发机部署到新服务器：
 
 ```bash
-git clone git@github.com:3086250048/goapp.git
-cd goapp
-docker compose up -d --build
-curl -fsS http://127.0.0.1:18080/api/health
+./deploy/deploy.sh --remote root@203.0.113.10 \
+  --domain trip.example.com
 ```
 
-预期返回：
+脚本会：
+
+1. 通过 SSH 把最新脚本传到目标机，并安装 Docker。
+2. 拉取 `master` 到 `/opt/goapp`，重复执行时执行 `git pull --ff-only`。
+3. 生成服务器本地的 `.env`，构建并启动应用与 SQLite 数据卷。
+4. 带域名时启动 Caddy `https` profile，自动申请并续期 HTTPS 证书。
+5. 等待 `/api/health`，并验证公网 `https://域名/api/health`。
+
+Windows 可在 WSL 中执行同一命令，或在 PowerShell 中运行：
+
+```powershell
+.\deploy\deploy.ps1 -Remote root@203.0.113.10 -Domain trip.example.com
+```
+
+如果代码已经在目标服务器上，也可以直接运行：
+
+```bash
+sudo ./deploy/deploy.sh --domain trip.example.com
+```
+
+不带 `--domain` 时只绑定 `127.0.0.1:18080`，适合已有反向代理或仅做内网验收。
+
+首次部署完成后检查：
 
 ```json
 {"ok":true,"database":"sqlite","version":"2.0.0"}
 ```
 
-`compose.yaml` 默认只把应用绑定到 `127.0.0.1:18080`，不会直接裸奔到公网。通过同机 Caddy 或 nginx 暴露 HTTPS。
-
 ## 2. 环境变量
 
-| 变量 | 默认 | 说明 |
+| 部署参数 / 变量 | 默认 | 说明 |
 |---|---|---|
+| `--domain` / `DOMAIN` | 空 | 设置后启用 Caddy HTTPS |
 | `APP_PORT` | `18080` | Compose 暴露到本机的端口 |
 | `DATA_DIR` | `/data` | 容器内数据库目录 |
 | `DEMO_MODE` | `1` | 开启体验账号与固定体验验证码；生产接入短信后必须关闭 |
 | `DEMO_OTP` | `123456` | 体验验证码 |
 | `COOKIE_SECURE` | `0` | 正式 HTTPS 部署设为 `1` |
+| `CADDY_IMAGE` | `caddy:2.10-alpine` | 可替换为内网镜像仓库地址 |
+
+脚本每次部署都会根据命令行参数重建项目根目录的 `.env`。`.env` 已加入 `.gitignore`，不能提交。
 
 生产环境示例：
 
@@ -52,18 +76,21 @@ volumes:
 
 `DEMO_MODE=0` 时，验证码只写入 `otp_challenges` 表，不会返回给浏览器，也不会打印到日志。接入短信服务商时需要把服务端生成的验证码交给短信 SDK；当前仓库没有虚构第三方短信接入。
 
-## 3. Caddy + 自动 HTTPS
+## 3. 内置 Caddy + 自动 HTTPS
 
-把 `deploy/Caddyfile` 中的 `trip.example.com` 改成你的域名，然后：
+一键脚本传入 `--domain` 后，会执行：
 
 ```bash
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
-sudo systemctl reload caddy
+docker compose --profile https up -d --remove-orphans
 ```
 
-DNS 的 A/AAAA 记录要先指向这台主机，并放行 80/443。
+`deploy/Caddyfile` 通过 `DOMAIN` 环境变量生成站点，反向代理到 `goapp:8080`。DNS 的 A/AAAA 记录要先指向这台主机，并放行 80/443。
 
-## 4. nginx + certbot
+Caddy 数据保存在独立卷 `goapp_caddy-data`，更新应用不会丢失证书。
+
+## 4. 使用已有 nginx + certbot
+
+不使用内置 Caddy 时，部署命令不要传 `--domain`，然后配置同机 nginx：
 
 ```bash
 sudo cp deploy/nginx-trip.conf /etc/nginx/sites-available/trip
@@ -72,16 +99,16 @@ sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d trip.example.com
 ```
 
-两种反向代理都已关闭静态缓存，`/api/*` 不会被缓存。
+nnginx 反向代理指向 `127.0.0.1:18080`；应用的 API 与 `/sw.js` 已自行返回正确的 `no-store` 响应头。
 
 ## 5. 发布更新
 
 ```bash
-git pull --ff-only
-docker compose up -d --build
-curl -fsS http://127.0.0.1:18080/api/health
-BASE_URL=https://trip.example.com python3 tools/api-smoke.py
+./deploy/deploy.sh --remote root@203.0.113.10 \
+  --domain trip.example.com
 ```
+
+重复执行原部署命令即可。远端模式会从 Git 拉取已推送的代码，所以部署前必须完成提交与推送。
 
 SQLite 使用 WAL 模式，数据库位于：
 
@@ -102,11 +129,15 @@ docker cp goapp:/data/backup.sqlite3 "./goapp-$(date +%F).sqlite3"
 docker exec goapp rm /data/backup.sqlite3
 ```
 
-恢复前先停应用，替换数据卷中的数据库，再启动：
+恢复前先停止应用，把备份写入数据卷并修复文件所有者：
 
 ```bash
 docker compose stop goapp
+docker compose run --rm --user root --entrypoint sh goapp \
+  -c 'rm -f /data/goapp.sqlite3 /data/goapp.sqlite3-wal /data/goapp.sqlite3-shm'
 docker cp goapp-backup.sqlite3 goapp:/data/goapp.sqlite3
+docker compose run --rm --user root --entrypoint chown goapp \
+  -R goapp:goapp /data
 docker compose start goapp
 ```
 
@@ -118,6 +149,7 @@ docker compose start goapp
 curl -fsS https://你的域名/api/health
 BASE_URL=https://你的域名 python3 tools/api-smoke.py
 node tools/check.js
+./tools/check-deploy.sh
 ```
 
 还要人工确认：

@@ -103,12 +103,25 @@ tools/browser-smoke.js 真实 Chromium 首页/下单/二维码回归
 tools/probe.js      CDP 交互回归（需要 Chromium）
 Dockerfile          单容器生产镜像
 compose.yaml        本地/单机部署编排与数据卷
+deploy/deploy.sh    一键部署、更新与 HTTPS 验收入口
+deploy/deploy.ps1   Windows / WSL 入口
 ```
 
 ## 部署
 
+从开发机迁移或更新远端服务器：
+
 ```bash
-docker compose up -d --build
+./deploy/deploy.sh --remote root@203.0.113.10 \
+  --domain trip.example.com
+```
+
+脚本会安装 Docker、拉取最新代码、生成 `.env`、启动 SQLite 数据卷、可选启用 Caddy HTTPS，并验证健康检查。重复执行同一条命令即为更新。Windows 使用 `.\deploy\deploy.ps1`，或在 WSL 中运行同一 Bash 命令。
+
+只在服务器本地启动、不配公网域名：
+
+```bash
+sudo ./deploy/deploy.sh
 ```
 
 域名、HTTPS、反向代理、数据备份和生产环境变量见 [deploy/README.md](deploy/README.md)。
@@ -119,6 +132,7 @@ docker compose up -d --build
 node tools/check.js
 BASE_URL=http://127.0.0.1:18080 python3 tools/api-smoke.py
 node tools/browser-smoke.js   # 需先启动 CDP_URL 指向的 Chromium
+./tools/check-deploy.sh
 ```
 
 `check.js` 覆盖页面渲染、事件绑定、导航和价格模型；`api-smoke.py` 覆盖静态站、体验会话、下单、二维码、持久化和退出登录；`browser-smoke.js` 覆盖真实浏览器里的首页、下单和凭证渲染。

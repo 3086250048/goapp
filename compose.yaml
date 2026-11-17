@@ -7,10 +7,33 @@ services:
       - "127.0.0.1:${APP_PORT:-18080}:8080"
     environment:
       DATA_DIR: /data
-      DEMO_MODE: "1"
-      DEMO_OTP: "123456"
+      DEMO_MODE: "${DEMO_MODE:-1}"
+      DEMO_OTP: "${DEMO_OTP:-123456}"
+      COOKIE_SECURE: "${COOKIE_SECURE:-0}"
     volumes:
       - goapp-data:/data
 
+  caddy:
+    image: "${CADDY_IMAGE:-caddy:2.10-alpine}"
+    profiles: ["https"]
+    container_name: goapp-caddy
+    restart: unless-stopped
+    depends_on:
+      goapp:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: "${DOMAIN:-}"
+      ACME_EMAIL: "${ACME_EMAIL:-}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
 volumes:
   goapp-data:
+  caddy-data:
+  caddy-config:

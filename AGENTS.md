@@ -192,6 +192,7 @@
 - 文案按第 6、7 节写
 - 任何业务判断先查第 5 节；规则没覆盖的，**提出来问，不要自己发明**
 - 改动会推翻已定稿决策时，先说明影响面，再动手
+- 部署相关组件有变化时，必须在同一个提交同步更新 `deploy/deploy.sh`
 - **每完成一个改动就提交并同步到远端**（见第 12 节）
 
 **你不应该**：
@@ -280,6 +281,30 @@ git config core.hooksPath tools/githooks      # Linux / macOS / Git Bash
 - **禁止 `git push --force`**，尤其服务器上由 agent 操作时
 - 改 UI 先升 `APP_VER` 再提交，否则版本无法区分
 - 不要提交 `.shots/`、`.env`、任何密钥
+
+**一键部署同步约束（必须遵守）**
+
+- 唯一部署入口是 `deploy/deploy.sh`；Windows 入口 `deploy/deploy.ps1` 只负责通过 WSL 调用它，不得复制一套部署逻辑。
+- 修改 `Dockerfile`、`compose.yaml`、`deploy/Caddyfile`、服务名、端口、环境变量、数据卷、健康检查、启动命令、静态目录或 API 监听方式时，**必须在同一个提交更新 `deploy/deploy.sh`**，并检查 `.env` 生成、依赖安装、启动和验收流程是否仍然一致。
+- 新增部署组件（例如数据库、对象存储、队列、证书服务）时，一键脚本必须同时支持首次安装、重复部署和迁移后的健康检查；不能只改 Compose 让脚本失效。
+- 部署改动提交前运行：
+
+  ```bash
+  bash -n deploy/deploy.sh
+  ./tools/check-deploy.sh
+  ```
+
+- 涉及真实服务器行为变化时，还要至少执行一次目标模式验收：
+
+  ```bash
+  # 在仓库所在服务器本地
+  sudo ./deploy/deploy.sh --skip-pull
+
+  # 或从开发机部署到远端
+  ./deploy/deploy.sh --remote user@host --domain trip.example.com
+  ```
+
+- 一键脚本不得执行 `docker compose down -v`、删除 `goapp-data` 或清空数据库；迁移和恢复必须走备份/恢复流程。
 
 ---
 

@@ -5,6 +5,7 @@
 node_modules/
 __pycache__/
 *.pyc
+.env
 
 # 打包/临时文件
 *.zip
