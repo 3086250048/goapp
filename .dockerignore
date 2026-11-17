@@ -1,0 +1,6 @@
+.git
+.env
+.shots
+data
+node_modules
+*.log

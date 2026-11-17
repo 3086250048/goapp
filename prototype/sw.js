@@ -1,6 +1,6 @@
-/* 出行原型 Service Worker —— 网络优先，断网时用缓存兜底
+/* 出行 App Service Worker —— 网络优先，断网时用缓存兜底
    注意：只在 HTTPS 下注册（见 index.html），本地开发不走缓存，避免改代码看不到效果。 */
-const VERSION = '1.1.3';
+const VERSION = '2.0.0';
 const CACHE = 'trip-' + VERSION;
 
 const ASSETS = [
@@ -35,7 +35,9 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
-  if (new URL(req.url).origin !== self.location.origin) return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  if (url.pathname.startsWith('/api/')) return;
 
   e.respondWith(
     fetch(req)

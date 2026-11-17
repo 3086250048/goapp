@@ -1,0 +1,1379 @@
+{
+  "TAXONOMY": {
+    "hobby": {
+      "title": "爱好",
+      "hint": "多选 1–5 个",
+      "mode": "multi",
+      "max": 5,
+      "min": 1,
+      "options": [
+        [
+          "food",
+          "美食探店"
+        ],
+        [
+          "hiking",
+          "徒步登山"
+        ],
+        [
+          "camping",
+          "露营野餐"
+        ],
+        [
+          "photo",
+          "摄影出片"
+        ],
+        [
+          "citywalk",
+          "城市漫步"
+        ],
+        [
+          "cafe",
+          "咖啡甜品"
+        ],
+        [
+          "museum",
+          "展览博物馆"
+        ],
+        [
+          "live",
+          "音乐现场"
+        ],
+        [
+          "cycling",
+          "骑行"
+        ],
+        [
+          "diving",
+          "潜水冲浪"
+        ],
+        [
+          "ski",
+          "滑雪"
+        ],
+        [
+          "hotspring",
+          "温泉泡汤"
+        ],
+        [
+          "theme",
+          "主题乐园"
+        ],
+        [
+          "heritage",
+          "古镇人文"
+        ],
+        [
+          "roadtrip",
+          "自驾"
+        ],
+        [
+          "stargazing",
+          "观星"
+        ],
+        [
+          "pet",
+          "宠物友好"
+        ],
+        [
+          "family",
+          "亲子出行"
+        ],
+        [
+          "nightlife",
+          "夜生活"
+        ],
+        [
+          "shopping",
+          "逛街购物"
+        ]
+      ]
+    },
+    "personality": {
+      "title": "性格",
+      "hint": "多选 0–3 个",
+      "mode": "multi",
+      "max": 3,
+      "min": 0,
+      "options": [
+        [
+          "outgoing",
+          "外向健谈"
+        ],
+        [
+          "introverted",
+          "内向安静"
+        ],
+        [
+          "planner",
+          "计划控"
+        ],
+        [
+          "spontaneous",
+          "随性即兴"
+        ],
+        [
+          "adventurous",
+          "冒险探索"
+        ],
+        [
+          "cautious",
+          "谨慎稳妥"
+        ],
+        [
+          "social",
+          "社交达人"
+        ],
+        [
+          "solitary",
+          "独处充电"
+        ],
+        [
+          "humorous",
+          "幽默风趣"
+        ],
+        [
+          "perfectionist",
+          "完美主义"
+        ],
+        [
+          "romantic",
+          "感性浪漫"
+        ],
+        [
+          "pragmatic",
+          "理性务实"
+        ]
+      ]
+    },
+    "occupation": {
+      "title": "职业",
+      "hint": "单选",
+      "mode": "single",
+      "max": 1,
+      "options": [
+        [
+          "student",
+          "学生"
+        ],
+        [
+          "tech",
+          "互联网/技术"
+        ],
+        [
+          "product",
+          "产品/设计"
+        ],
+        [
+          "finance",
+          "金融"
+        ],
+        [
+          "education",
+          "教育"
+        ],
+        [
+          "medical",
+          "医疗健康"
+        ],
+        [
+          "gov",
+          "公务员/事业单位"
+        ],
+        [
+          "media",
+          "媒体/创意"
+        ],
+        [
+          "freelance",
+          "自由职业"
+        ],
+        [
+          "business",
+          "个体经营"
+        ],
+        [
+          "manufacturing",
+          "制造/工程"
+        ],
+        [
+          "sales",
+          "销售/市场"
+        ],
+        [
+          "legal",
+          "法律"
+        ],
+        [
+          "other",
+          "其他"
+        ]
+      ]
+    },
+    "gender": {
+      "title": "性别",
+      "hint": "单选",
+      "mode": "single",
+      "max": 1,
+      "options": [
+        [
+          "male",
+          "男"
+        ],
+        [
+          "female",
+          "女"
+        ],
+        [
+          "other",
+          "其他"
+        ],
+        [
+          "undisclosed",
+          "不愿透露"
+        ]
+      ]
+    }
+  },
+  "TRIPS": [
+    {
+      "id": "t1",
+      "title": "周末古镇漫步 + 特色小吃",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 9,
+      "distance": 1200,
+      "city": "苏州",
+      "cover": {
+        "from": "#D79A6A",
+        "to": "#8A4B2C",
+        "emoji": "🏯"
+      },
+      "stops": [
+        {
+          "name": "平江路历史街区",
+          "type": "play",
+          "time": "09:30",
+          "stay": 120,
+          "leg": "步行 12 分钟",
+          "items": [
+            {
+              "icon": "🚶",
+              "name": "古镇漫步",
+              "price": 0,
+              "mode": "pp"
+            },
+            {
+              "icon": "🍡",
+              "name": "特色小吃街",
+              "price": 45,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "拙政园",
+          "type": "play",
+          "time": "13:00",
+          "stay": 150,
+          "leg": "步行 8 分钟",
+          "items": [
+            {
+              "icon": "🎫",
+              "name": "园林门票",
+              "price": 70,
+              "mode": "pp"
+            },
+            {
+              "icon": "☕",
+              "name": "临水茶室",
+              "price": 35,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "山塘街",
+          "type": "play",
+          "time": "18:30",
+          "stay": 90,
+          "items": [
+            {
+              "icon": "🚤",
+              "name": "古运河游船",
+              "price": 55,
+              "mode": "pp"
+            },
+            {
+              "icon": "🎶",
+              "name": "评弹小馆",
+              "price": 40,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t2",
+      "title": "城市夜市扫街 + 烧烤啤酒",
+      "tags": [
+        "food"
+      ],
+      "durationHours": 5,
+      "distance": 3400,
+      "city": "本地",
+      "cover": {
+        "from": "#3B2B4A",
+        "to": "#E4553A",
+        "emoji": "🍢"
+      },
+      "stops": [
+        {
+          "name": "老门东夜市",
+          "type": "food",
+          "time": "18:00",
+          "stay": 80,
+          "leg": "步行 6 分钟",
+          "items": [
+            {
+              "icon": "🍢",
+              "name": "烧烤拼盘",
+              "price": 68,
+              "mode": "pp"
+            },
+            {
+              "icon": "🍺",
+              "name": "精酿一杯",
+              "price": 28,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "巷口锅贴铺",
+          "type": "food",
+          "time": "19:40",
+          "stay": 45,
+          "leg": "步行 4 分钟",
+          "items": [
+            {
+              "icon": "🥟",
+              "name": "招牌锅贴",
+              "price": 22,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "糖水铺子",
+          "type": "food",
+          "time": "20:40",
+          "stay": 40,
+          "leg": "步行 9 分钟",
+          "items": [
+            {
+              "icon": "🍧",
+              "name": "老式糖水",
+              "price": 16,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "江边观景台",
+          "type": "play",
+          "time": "21:40",
+          "stay": 30,
+          "items": [
+            {
+              "icon": "🌃",
+              "name": "夜景散步",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t3",
+      "title": "山野徒步 + 农家柴火饭",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 8,
+      "distance": 12400,
+      "city": "郊野",
+      "cover": {
+        "from": "#6BA36B",
+        "to": "#2F5E3A",
+        "emoji": "🥾"
+      },
+      "stops": [
+        {
+          "name": "北高峰登山口",
+          "type": "play",
+          "time": "08:30",
+          "stay": 180,
+          "leg": "步行 5 分钟",
+          "items": [
+            {
+              "icon": "🥾",
+              "name": "山径徒步",
+              "price": 0,
+              "mode": "pp"
+            },
+            {
+              "icon": "🎫",
+              "name": "景区门票",
+              "price": 40,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "半山观景台",
+          "type": "play",
+          "time": "12:00",
+          "stay": 40,
+          "leg": "车行 15 分钟",
+          "items": [
+            {
+              "icon": "📷",
+              "name": "观景拍照",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "山脚农家院",
+          "type": "food",
+          "time": "13:30",
+          "stay": 90,
+          "items": [
+            {
+              "icon": "🍚",
+              "name": "柴火灶台饭",
+              "price": 58,
+              "mode": "pp"
+            },
+            {
+              "icon": "🚐",
+              "name": "往返包车",
+              "price": 160,
+              "mode": "gp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t4",
+      "title": "老城咖啡地图 + 独立书店",
+      "tags": [
+        "food",
+        "play"
+      ],
+      "durationHours": 4,
+      "distance": 2100,
+      "city": "本地",
+      "cover": {
+        "from": "#C9A227",
+        "to": "#6E4B24",
+        "emoji": "☕"
+      },
+      "stops": [
+        {
+          "name": "梧桐路咖啡街",
+          "type": "food",
+          "time": "10:00",
+          "stay": 50,
+          "leg": "步行 7 分钟",
+          "items": [
+            {
+              "icon": "☕",
+              "name": "手冲单品",
+              "price": 38,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "旧仓库书店",
+          "type": "play",
+          "time": "11:10",
+          "stay": 60,
+          "leg": "步行 5 分钟",
+          "items": [
+            {
+              "icon": "📚",
+              "name": "书店闲逛",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "街角面包房",
+          "type": "food",
+          "time": "12:30",
+          "stay": 35,
+          "leg": "步行 3 分钟",
+          "items": [
+            {
+              "icon": "🥐",
+              "name": "可颂 + 拿铁",
+              "price": 42,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "老教堂广场",
+          "type": "play",
+          "time": "13:20",
+          "stay": 30,
+          "items": [
+            {
+              "icon": "⛪",
+              "name": "广场闲坐",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t5",
+      "title": "湖畔露营 + 星空摄影",
+      "tags": [
+        "play"
+      ],
+      "durationHours": 10,
+      "distance": 28000,
+      "city": "周边",
+      "cover": {
+        "from": "#2A3B5C",
+        "to": "#6C7FA3",
+        "emoji": "⛺"
+      },
+      "stops": [
+        {
+          "name": "青湖营地",
+          "type": "play",
+          "time": "14:00",
+          "stay": 240,
+          "leg": "步行 3 分钟",
+          "items": [
+            {
+              "icon": "⛺",
+              "name": "双人帐篷",
+              "price": 120,
+              "mode": "gp"
+            },
+            {
+              "icon": "🔥",
+              "name": "营位与篝火",
+              "price": 80,
+              "mode": "gp"
+            }
+          ]
+        },
+        {
+          "name": "湖岸栈道",
+          "type": "play",
+          "time": "18:00",
+          "stay": 60,
+          "leg": "车行 10 分钟",
+          "items": [
+            {
+              "icon": "🌅",
+              "name": "日落散步",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "观星台",
+          "type": "play",
+          "time": "20:00",
+          "stay": 120,
+          "items": [
+            {
+              "icon": "🔭",
+              "name": "天文望远镜",
+              "price": 60,
+              "mode": "pp"
+            },
+            {
+              "icon": "📷",
+              "name": "星空摄影指导",
+              "price": 90,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t6",
+      "title": "博物馆一日 + 本帮菜",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 7,
+      "distance": 5600,
+      "city": "本地",
+      "cover": {
+        "from": "#8E7CC3",
+        "to": "#4B3F72",
+        "emoji": "🏛"
+      },
+      "stops": [
+        {
+          "name": "城市博物馆",
+          "type": "play",
+          "time": "10:00",
+          "stay": 180,
+          "leg": "步行 10 分钟",
+          "items": [
+            {
+              "icon": "🎫",
+              "name": "常设展门票",
+              "price": 0,
+              "mode": "pp"
+            },
+            {
+              "icon": "🎧",
+              "name": "语音导览",
+              "price": 25,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "老弄堂本帮菜",
+          "type": "food",
+          "time": "13:30",
+          "stay": 90,
+          "leg": "步行 6 分钟",
+          "items": [
+            {
+              "icon": "🍲",
+              "name": "四人套餐",
+              "price": 88,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "滨江步道",
+          "type": "play",
+          "time": "15:30",
+          "stay": 60,
+          "items": [
+            {
+              "icon": "🚶",
+              "name": "江边散步",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t7",
+      "title": "骑行江畔 + 江鲜小馆",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 5,
+      "distance": 6800,
+      "city": "本地",
+      "cover": {
+        "from": "#4FA3C7",
+        "to": "#1F5C7A",
+        "emoji": "🚲"
+      },
+      "stops": [
+        {
+          "name": "滨江骑行道",
+          "type": "play",
+          "time": "15:00",
+          "stay": 100,
+          "leg": "骑行 12 分钟",
+          "items": [
+            {
+              "icon": "🚲",
+              "name": "城市单车",
+              "price": 15,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "渔人码头",
+          "type": "play",
+          "time": "17:00",
+          "stay": 40,
+          "leg": "骑行 6 分钟",
+          "items": [
+            {
+              "icon": "📷",
+              "name": "码头拍照",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "江鲜小馆",
+          "type": "food",
+          "time": "18:00",
+          "stay": 80,
+          "leg": "",
+          "items": [
+            {
+              "icon": "🐟",
+              "name": "清蒸江鱼",
+              "price": 78,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "堤岸落日点",
+          "type": "play",
+          "time": "19:30",
+          "stay": 30,
+          "items": [
+            {
+              "icon": "🌇",
+              "name": "落日观赏",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t8",
+      "title": "温泉泡汤 + 山间素斋",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 9,
+      "distance": 42000,
+      "city": "周边",
+      "cover": {
+        "from": "#C97B7B",
+        "to": "#6B2F3A",
+        "emoji": "♨️"
+      },
+      "stops": [
+        {
+          "name": "云顶温泉",
+          "type": "play",
+          "time": "10:30",
+          "stay": 210,
+          "leg": "步行 8 分钟",
+          "items": [
+            {
+              "icon": "♨️",
+              "name": "露天汤池",
+              "price": 168,
+              "mode": "pp"
+            },
+            {
+              "icon": "💆",
+              "name": "肩颈按摩",
+              "price": 98,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "山间素斋馆",
+          "type": "food",
+          "time": "13:30",
+          "stay": 80,
+          "items": [
+            {
+              "icon": "🥗",
+              "name": "时令素斋",
+              "price": 68,
+              "mode": "pp"
+            },
+            {
+              "icon": "🚐",
+              "name": "往返接送",
+              "price": 220,
+              "mode": "gp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t9",
+      "title": "亲子农场 + 田园午餐",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 5,
+      "distance": 15000,
+      "city": "郊野",
+      "cover": {
+        "from": "#9BC26B",
+        "to": "#4E7A2E",
+        "emoji": "🌾"
+      },
+      "stops": [
+        {
+          "name": "禾田农场",
+          "type": "play",
+          "time": "09:30",
+          "stay": 120,
+          "leg": "步行 5 分钟",
+          "items": [
+            {
+              "icon": "🧺",
+              "name": "采摘体验",
+              "price": 58,
+              "mode": "pp"
+            },
+            {
+              "icon": "🐑",
+              "name": "动物喂养",
+              "price": 30,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "田园餐厅",
+          "type": "food",
+          "time": "12:00",
+          "stay": 80,
+          "leg": "步行 15 分钟",
+          "items": [
+            {
+              "icon": "🍚",
+              "name": "田园午餐",
+              "price": 68,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "稻田栈道",
+          "type": "play",
+          "time": "14:00",
+          "stay": 40,
+          "items": [
+            {
+              "icon": "🌾",
+              "name": "稻田散步",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t10",
+      "title": "古镇夜游 + 评弹茶座",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 4,
+      "distance": 18000,
+      "city": "周边",
+      "cover": {
+        "from": "#2F3A55",
+        "to": "#6B4E8A",
+        "emoji": "🌙"
+      },
+      "stops": [
+        {
+          "name": "南浔古镇",
+          "type": "play",
+          "time": "17:30",
+          "stay": 90,
+          "leg": "步行 7 分钟",
+          "items": [
+            {
+              "icon": "🏮",
+              "name": "夜游古镇",
+              "price": 40,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "临河茶座",
+          "type": "food",
+          "time": "19:20",
+          "stay": 60,
+          "leg": "步行 4 分钟",
+          "items": [
+            {
+              "icon": "🍵",
+              "name": "茶位 + 点心",
+              "price": 48,
+              "mode": "pp"
+            },
+            {
+              "icon": "🎶",
+              "name": "评弹演出",
+              "price": 60,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "百间楼河岸",
+          "type": "play",
+          "time": "20:40",
+          "stay": 40,
+          "items": [
+            {
+              "icon": "📷",
+              "name": "夜景拍摄",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t11",
+      "title": "城市漫步 + 街角面包房",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 4,
+      "distance": 800,
+      "city": "本地",
+      "cover": {
+        "from": "#E0B080",
+        "to": "#96683B",
+        "emoji": "🥐"
+      },
+      "stops": [
+        {
+          "name": "思南路街区",
+          "type": "play",
+          "time": "10:00",
+          "stay": 70,
+          "leg": "步行 6 分钟",
+          "items": [
+            {
+              "icon": "🚶",
+              "name": "街区漫步",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "街角面包房",
+          "type": "food",
+          "time": "11:20",
+          "stay": 35,
+          "leg": "步行 3 分钟",
+          "items": [
+            {
+              "icon": "🥐",
+              "name": "现烤可颂",
+              "price": 24,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "旧法租界小巷",
+          "type": "play",
+          "time": "12:10",
+          "stay": 50,
+          "leg": "步行 8 分钟",
+          "items": [
+            {
+              "icon": "📷",
+              "name": "巷弄拍照",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "社区菜场小馆",
+          "type": "food",
+          "time": "13:20",
+          "stay": 60,
+          "items": [
+            {
+              "icon": "🍜",
+              "name": "一碗本帮面",
+              "price": 32,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t12",
+      "title": "海岛出海 + 海鲜大排档",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 10,
+      "distance": 56000,
+      "city": "周边",
+      "cover": {
+        "from": "#58C7D6",
+        "to": "#1C6E8C",
+        "emoji": "🏝"
+      },
+      "stops": [
+        {
+          "name": "东海渔港",
+          "type": "play",
+          "time": "09:00",
+          "stay": 150,
+          "leg": "船行 30 分钟",
+          "items": [
+            {
+              "icon": "⛵",
+              "name": "出海渔船",
+              "price": 180,
+              "mode": "pp"
+            },
+            {
+              "icon": "🎣",
+              "name": "海钓体验",
+              "price": 80,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "无人沙洲",
+          "type": "play",
+          "time": "12:00",
+          "stay": 60,
+          "leg": "船行 20 分钟",
+          "items": [
+            {
+              "icon": "🏝",
+              "name": "登岛漫步",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "渔港大排档",
+          "type": "food",
+          "time": "16:30",
+          "stay": 90,
+          "items": [
+            {
+              "icon": "🦐",
+              "name": "海鲜拼盘",
+              "price": 138,
+              "mode": "pp"
+            },
+            {
+              "icon": "🚐",
+              "name": "往返包车",
+              "price": 260,
+              "mode": "gp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t13",
+      "title": "清晨市集 + 现磨豆浆",
+      "tags": [
+        "food"
+      ],
+      "durationHours": 3,
+      "distance": 2600,
+      "city": "本地",
+      "cover": {
+        "from": "#E8C27A",
+        "to": "#A9743A",
+        "emoji": "🥣"
+      },
+      "stops": [
+        {
+          "name": "城南早市",
+          "type": "food",
+          "time": "06:30",
+          "stay": 60,
+          "leg": "步行 8 分钟",
+          "items": [
+            {
+              "icon": "🥛",
+              "name": "现磨豆浆",
+              "price": 8,
+              "mode": "pp"
+            },
+            {
+              "icon": "🥟",
+              "name": "生煎包",
+              "price": 16,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "老街豆浆铺",
+          "type": "food",
+          "time": "07:40",
+          "stay": 40,
+          "items": [
+            {
+              "icon": "🍜",
+              "name": "咸豆浆 + 油条",
+              "price": 12,
+              "mode": "pp"
+            },
+            {
+              "icon": "🧑‍🍳",
+              "name": "早市向导",
+              "price": 60,
+              "mode": "gp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t14",
+      "title": "江边落日 + 精酿小馆",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 4,
+      "distance": 5200,
+      "city": "本地",
+      "cover": {
+        "from": "#F0A15E",
+        "to": "#7A3E5C",
+        "emoji": "🌇"
+      },
+      "stops": [
+        {
+          "name": "滨江日落观测点",
+          "type": "play",
+          "time": "17:00",
+          "stay": 60,
+          "leg": "步行 10 分钟",
+          "items": [
+            {
+              "icon": "🌇",
+              "name": "江边看日落",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "精酿小馆",
+          "type": "food",
+          "time": "18:30",
+          "stay": 90,
+          "leg": "步行 5 分钟",
+          "items": [
+            {
+              "icon": "🍺",
+              "name": "精酿套餐",
+              "price": 88,
+              "mode": "pp"
+            },
+            {
+              "icon": "🍟",
+              "name": "小食拼盘",
+              "price": 38,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "江滩夜灯带",
+          "type": "play",
+          "time": "20:10",
+          "stay": 40,
+          "items": [
+            {
+              "icon": "✨",
+              "name": "夜灯散步",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t15",
+      "title": "手作陶艺 + 巷口馄饨",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 4,
+      "distance": 3100,
+      "city": "本地",
+      "cover": {
+        "from": "#C9A9A0",
+        "to": "#6E4B44",
+        "emoji": "🏺"
+      },
+      "stops": [
+        {
+          "name": "陶艺工作室",
+          "type": "play",
+          "time": "10:00",
+          "stay": 120,
+          "leg": "步行 6 分钟",
+          "items": [
+            {
+              "icon": "🏺",
+              "name": "拉坯体验",
+              "price": 128,
+              "mode": "pp"
+            },
+            {
+              "icon": "🎨",
+              "name": "釉色上色",
+              "price": 40,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "巷口馄饨摊",
+          "type": "food",
+          "time": "12:30",
+          "stay": 40,
+          "leg": "步行 4 分钟",
+          "items": [
+            {
+              "icon": "🥟",
+              "name": "鲜肉小馄饨",
+              "price": 18,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "老城旧书店",
+          "type": "play",
+          "time": "13:30",
+          "stay": 50,
+          "items": [
+            {
+              "icon": "📚",
+              "name": "淘旧书",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "t16",
+      "title": "湿地观鸟 + 湖畔咖啡",
+      "tags": [
+        "play",
+        "food"
+      ],
+      "durationHours": 6,
+      "distance": 21000,
+      "city": "郊野",
+      "cover": {
+        "from": "#8FBFA8",
+        "to": "#2E5F52",
+        "emoji": "🦩"
+      },
+      "stops": [
+        {
+          "name": "南湖湿地公园",
+          "type": "play",
+          "time": "08:00",
+          "stay": 180,
+          "leg": "步行 12 分钟",
+          "items": [
+            {
+              "icon": "🎫",
+              "name": "湿地门票",
+              "price": 30,
+              "mode": "pp"
+            },
+            {
+              "icon": "🔭",
+              "name": "观鸟望远镜",
+              "price": 40,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "湖畔咖啡屋",
+          "type": "food",
+          "time": "11:30",
+          "stay": 50,
+          "leg": "步行 8 分钟",
+          "items": [
+            {
+              "icon": "☕",
+              "name": "手冲 + 司康",
+              "price": 48,
+              "mode": "pp"
+            }
+          ]
+        },
+        {
+          "name": "芦苇栈道",
+          "type": "play",
+          "time": "12:40",
+          "stay": 40,
+          "items": [
+            {
+              "icon": "🌾",
+              "name": "栈道漫步",
+              "price": 0,
+              "mode": "pp"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

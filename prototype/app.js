@@ -1,12 +1,12 @@
 /* ============================================================
-   出行 App · 交互原型主逻辑
+   出行 App · 前端主逻辑
    - 单页 hash 路由
    - 完整链路：注册 → 画像 → 地址 → 首页 → 详情 → 确认 → 支付 → 凭证 → 个人中心 → 订单
    ============================================================ */
 
 /* ---------------- 运行时错误可见化 ---------------- */
-const APP_VER = '1.1.3';
-console.log('[出行原型] v' + APP_VER);
+const APP_VER = '2.0.0';
+console.log('[出行] v' + APP_VER);
 
 window.addEventListener('error', e => {
   try {
@@ -52,6 +52,8 @@ function blankState() {
   return {
     auth: false,
     seeded: false,
+    phone: '',
+    demo: false,
     nickname: '出行者8823',
     profile: { hobby: [], personality: [], occupation: null, gender: null },
     addresses: [],
@@ -61,12 +63,52 @@ function blankState() {
   };
 }
 
-let S = (() => {
-  try { return Object.assign(blankState(), JSON.parse(sessionStorage.getItem(STORE_KEY)) || {}); }
-  catch (e) { return blankState(); }
-})();
+let S = blankState();
 
 function save() { try { sessionStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) {} }
+
+async function api(path, options = {}) {
+  const opts = Object.assign({ credentials: 'same-origin', headers: {} }, options);
+  if (opts.body && typeof opts.body !== 'string') {
+    opts.headers = Object.assign({}, opts.headers, { 'Content-Type': 'application/json' });
+    opts.body = JSON.stringify(opts.body);
+  }
+  const res = await fetch(path, opts);
+  let data = {};
+  try { data = await res.json(); } catch (_) {}
+  if (!res.ok) {
+    const error = new Error(data.error || `请求失败（${res.status}）`);
+    error.status = res.status;
+    throw error;
+  }
+  return data;
+}
+
+function applyRemoteState(data) {
+  if (data.catalog && Array.isArray(data.catalog.trips) && data.catalog.trips.length) {
+    TRIPS = data.catalog.trips;
+    TAXONOMY = data.catalog.taxonomy;
+  }
+  const next = blankState();
+  next.demo = Boolean(data.demo);
+  if (data.auth && data.user) {
+    next.auth = true;
+    next.phone = data.user.phone || '';
+    next.nickname = data.user.nickname || next.nickname;
+    next.profile = Object.assign(next.profile, data.user.profile || {});
+    next.addresses = Array.isArray(data.addresses) ? data.addresses : [];
+    next.defaultId = (next.addresses.find(a => a.isDefault) || next.addresses[0] || {}).id || null;
+    next.orders = Array.isArray(data.orders) ? data.orders : [];
+    next.lastChannel = data.lastChannel || 'wechat';
+  }
+  S = next;
+}
+
+function maskedPhone(phone) {
+  const value = String(phone || '');
+  if (/^1\d{10}$/.test(value)) return `${value.slice(0, 3)}****${value.slice(-4)}`;
+  return value.startsWith('demo-') ? '体验账号' : (value || '未绑定手机号');
+}
 
 /* ---------------- 业务计算 ---------------- */
 function tripStats(trip, people) {
@@ -363,7 +405,7 @@ const RegisterScreen = {
       timer = setInterval(tick, 1000);
     }
 
-    sendBtn.onclick = () => {
+    sendBtn.onclick = async () => {
       if (!validPhone()) {
         $('#fPhone').classList.add('err');
         $('#errPhone').textContent = '请输入正确的 11 位手机号';
@@ -372,9 +414,19 @@ const RegisterScreen = {
       }
       $('#fPhone').classList.remove('err');
       $('#errPhone').textContent = '';
-      codeEl.value = '123456';
-      startCd();
-      toast('验证码已发送（演示：自动填入 123456）');
+      sendBtn.disabled = true;
+      try {
+        const data = await api('/api/auth/request-code', {
+          method: 'POST',
+          body: { phone: phoneEl.value.trim() }
+        });
+        if (data.demoCode) codeEl.value = data.demoCode;
+        startCd();
+        toast(data.demoCode ? '验证码已发送（体验版自动填入）' : '验证码已发送');
+      } catch (e) {
+        sendBtn.disabled = false;
+        toast(e.message);
+      }
     };
 
     phoneEl.oninput = () => {
@@ -386,12 +438,21 @@ const RegisterScreen = {
       if (e.key === 'Enter') $('#doRegister').click();
     });
 
-    function finish() {
-      S.auth = true;
-      if (!S.nickname) S.nickname = '出行者' + (phoneEl.value.slice(-4) || '8823');
-      try { ensureSeed(); } catch (e) { console.error('ensureSeed', e); }
-      save();
-      location.hash = '#/profile';
+    async function finish() {
+      const submit = $('#doRegister');
+      submit.disabled = true;
+      try {
+        const data = await api('/api/auth/verify', {
+          method: 'POST',
+          body: { phone: phoneEl.value.trim(), code: codeEl.value.trim() }
+        });
+        applyRemoteState(data);
+        if (location.hash === '#/profile') render();
+        else location.hash = '#/profile';
+      } catch (e) {
+        toast(e.message);
+        submit.disabled = false;
+      }
     }
 
     $('#doRegister').onclick = () => {
@@ -413,24 +474,20 @@ const RegisterScreen = {
       finish();
     };
 
-    const oauth = (label) => () => {
-      toast(`已授权${label} · 继续绑定手机号`);
-      phoneEl.value = '13800138000';
-      codeEl.value = '123456';
-      setTimeout(finish, 500);
-    };
-    $('#wx').onclick = oauth('微信');
-    $('#qq').onclick = oauth('QQ');
+    $('#wx').onclick = () => toast('微信登录尚未接入，请使用手机号登录');
+    $('#qq').onclick = () => toast('QQ 登录尚未接入，请使用手机号登录');
 
-    $('#skip').onclick = () => {
-      S.auth = true;
-      if (!S.addresses.length) {
-        S.addresses.push({ id: 'a1', tag: '家', name: '阳光里小区 3 号楼', address: '朝阳区望京街道阜通东大街 6 号', detail: '2 单元 1801', isDefault: true });
-        S.defaultId = 'a1';
+    $('#skip').onclick = async () => {
+      $('#skip').disabled = true;
+      try {
+        const data = await api('/api/auth/demo', { method: 'POST', body: {} });
+        applyRemoteState(data);
+        if (location.hash === '#/home') render();
+        else location.hash = '#/home';
+      } catch (e) {
+        $('#skip').disabled = false;
+        toast(e.message);
       }
-      ensureSeed();
-      save();
-      location.hash = '#/home';
     };
   }
 };
@@ -517,13 +574,22 @@ const ProfileScreen = {
       $('#nickname', root).value = POOL[Math.floor(Math.random() * POOL.length)] + Math.floor(Math.random() * 90 + 10);
     };
 
-    $('#next', root).onclick = () => {
+    $('#next', root).onclick = async () => {
       if (!(draft.hobby || []).length) { toast('至少选择 1 个爱好'); return; }
-      S.profile = draft;
       const nn = $('#nickname', root).value.trim();
-      if (nn) S.nickname = nn;
-      save();
-      location.hash = '#/address?from=onboarding';
+      const button = $('#next', root);
+      button.disabled = true;
+      try {
+        const data = await api('/api/profile', {
+          method: 'PATCH',
+          body: { profile: draft, nickname: nn || S.nickname }
+        });
+        applyRemoteState(data);
+        location.hash = '#/address?from=onboarding';
+      } catch (e) {
+        button.disabled = false;
+        toast(e.message);
+      }
     };
 
     $('#skipProfile', root).onclick = () => { location.hash = '#/address'; };
@@ -590,14 +656,28 @@ const AddressScreen = {
     };
     $('#locateBtn', root).onclick = () => toast('已定位到当前位置');
 
-    $('#confirmAddr', root).onclick = () => {
+    $('#confirmAddr', root).onclick = async () => {
       const p = POIS[picked];
+      const button = $('#confirmAddr', root);
       if (!S.addresses.length) {
-        const a = { id: 'a1', tag: p.tag, name: p.name, address: p.line.split('·')[0].trim(), detail: '', isDefault: true };
-        S.addresses.push(a);
-        S.defaultId = a.id;
+        button.disabled = true;
+        try {
+          const data = await api('/api/addresses', {
+            method: 'POST',
+            body: {
+              tag: p.tag,
+              name: p.name,
+              address: p.line.split('·')[0].trim(),
+              detail: ''
+            }
+          });
+          applyRemoteState(data);
+        } catch (e) {
+          button.disabled = false;
+          toast(e.message);
+          return;
+        }
       }
-      save();
       toast('已设置为你的生活地址');
       setTimeout(() => {
         if (from === 'onboarding') location.hash = '#/home';
@@ -774,7 +854,7 @@ const DetailScreen = {
         remain: i === 2 ? 3 : (i % 5 === 0 ? 12 : null)
       });
     }
-    let selected = (dates.find(d => !d.full) || dates[0]).key;
+    let selected = (dates.find(d => d.i >= 1 && !d.full) || dates.find(d => !d.full) || dates[0]).key;
 
     function renderStrip() {
       const st = tripStats(trip, people);
@@ -911,17 +991,34 @@ const CheckoutScreen = {
       S.lastChannel = o.dataset.ch;
     });
 
-    $('#payBtn', root).onclick = () => {
+    $('#payBtn', root).onclick = async () => {
       if (!$('#agree', root).checked) { toast('请先阅读并同意预订须知'); return; }
+      const payButton = $('#payBtn', root);
+      payButton.disabled = true;
       const ov = document.createElement('div');
       ov.className = 'overlay';
       ov.innerHTML = `<div class="box"><div class="spinner"></div><p>正在支付…</p><small>请勿关闭页面</small></div>`;
       root.appendChild(ov);
 
-      setTimeout(() => {
-        const order = createOrder(trip, people, dateK);
-        location.hash = `#/success/${order.id}`;
-      }, 1400);
+      try {
+        await new Promise(resolve => setTimeout(resolve, 550));
+        const data = await api('/api/orders', {
+          method: 'POST',
+          body: {
+            tripId: trip.id,
+            people,
+            travelDate: dateK,
+            channel: S.lastChannel
+          }
+        });
+        S.orders.unshift(data.order);
+        save();
+        location.hash = `#/success/${data.order.id}`;
+      } catch (e) {
+        ov.remove();
+        payButton.disabled = false;
+        toast(e.message);
+      }
     };
   }
 };
@@ -937,7 +1034,7 @@ function voucherCardHtml(v, opts = {}) {
     </div>
 
     <div class="qr-wrap">
-      ${qrSvg(v.code, 168)}
+      <img class="qr" src="/api/vouchers/${encodeURIComponent(v.id)}/qr.svg" width="168" height="168" alt="凭证二维码">
       ${used ? '<div class="qr-stamp">已使用</div>' : ''}
     </div>
 
@@ -1051,7 +1148,7 @@ const MeScreen = {
           <div class="big-avatar">${esc((S.nickname || '出')[0])}</div>
           <div style="min-width:0">
             <h2>${esc(S.nickname || '出行用户')}</h2>
-            <p>138****8000<br>微信已绑定 · QQ 未绑定</p>
+            <p>${esc(maskedPhone(S.phone))}<br>${S.demo ? '体验账号 · 数据独立保存' : '手机号已验证'}</p>
           </div>
           <span class="arrow">›</span>
         </div>
@@ -1093,9 +1190,9 @@ const MeScreen = {
 
         <div class="gap"></div>
 
-        <div class="inforow"><span class="k">手机号</span><span class="v">138****8000</span><span class="a orange">换绑</span></div>
-        <div class="inforow"><span class="k">微信</span><span class="v">已绑定</span><span class="a">解绑</span></div>
-        <div class="inforow"><span class="k">QQ</span><span class="v" style="color:#C0C4CC">未绑定</span><span class="a orange">绑定</span></div>
+        <div class="inforow"><span class="k">手机号</span><span class="v">${esc(maskedPhone(S.phone))}</span><span class="a"></span></div>
+        <div class="inforow"><span class="k">微信</span><span class="v" style="color:#C0C4CC">未接入</span><span class="a"></span></div>
+        <div class="inforow"><span class="k">QQ</span><span class="v" style="color:#C0C4CC">未接入</span><span class="a"></span></div>
 
         <div class="gap"></div>
 
@@ -1103,16 +1200,26 @@ const MeScreen = {
         <div class="inforow"><span class="k">隐私政策</span><span class="v"></span><span class="a">›</span></div>
         <div class="inforow"><span class="k">注销账号</span><span class="v"></span><span class="a">›</span></div>
 
-        <button class="logout" id="resetBtn">退出登录 / 重置演示</button>
-        <div class="version">出行 App · 原型 v${APP_VER}</div>
+        <button class="logout" id="resetBtn">退出登录</button>
+        <div class="version">出行 App · 线上版 v${APP_VER}</div>
       </div>
     </div>`;
   },
   mount() {
     const root = $('.screen', appEl);
-    $('#resetBtn', root).onclick = () => {
+    $('#resetBtn', root).onclick = async () => {
+      const button = $('#resetBtn', root);
+      button.disabled = true;
+      try {
+        await api('/api/auth/logout', { method: 'POST', body: {} });
+      } catch (e) {
+        toast(e.message);
+        button.disabled = false;
+        return;
+      }
       sessionStorage.removeItem(STORE_KEY);
       S = blankState();
+      navStack.length = 0;
       location.hash = '#/register';
     };
   }
@@ -1253,38 +1360,6 @@ const OrderDetailScreen = {
   }
 };
 
-/* ---------------- ?demo=1 直达（跳过注册，方便快速预览） ---------------- */
-(function demoBootstrap() {
-  try {
-    const q = new URLSearchParams(location.search);
-    if (q.get('demo') !== '1') return;
-    if (typeof TRIPS === 'undefined' || !TRIPS.length) return;
-    S.auth = true;
-    if (!S.addresses.length) {
-      S.addresses.push({
-        id: 'a1', tag: '家', name: '阳光里小区 3 号楼',
-        address: '朝阳区望京街道阜通东大街 6 号', detail: '2 单元 1801', isDefault: true
-      });
-      S.defaultId = 'a1';
-    }
-    ensureSeed();
-    if (!S.profile.hobby.length) {
-      S.profile = {
-        hobby: ['food', 'citywalk', 'cafe'],
-        personality: ['planner', 'introverted'],
-        occupation: 'tech',
-        gender: 'female'
-      };
-    }
-    if (!S.orders.some(o => o.status === 'paid')) {
-      createOrder(TRIPS[0], 4, dateKey(new Date()));
-    }
-    save();
-  } catch (e) {
-    console.error('demoBootstrap', e);
-  }
-})();
-
 /* ---------------- 单项编辑页（只改一个字段，保存后回到个人信息） ---------------- */
 const FIELD_TITLE = { hobby: '爱好', personality: '性格', occupation: '职业', gender: '性别' };
 const FIELD_HINT = {
@@ -1353,14 +1428,21 @@ const EditFieldScreen = {
         err.textContent = '';
       };
 
-      $('#saveNick', root).onclick = () => {
+      $('#saveNick', root).onclick = async () => {
         const v = input.value.trim().replace(/\s{2,}/g, ' ');
         const len = [...v].length;
         if (len < 2 || len > 12) { err.textContent = '昵称需 2–12 个字'; toast('昵称需 2–12 个字'); return; }
-        S.nickname = v;
-        save();
-        toast('昵称已更新');
-        goBack('#/me');
+        const button = $('#saveNick', root);
+        button.disabled = true;
+        try {
+          const data = await api('/api/nickname', { method: 'PATCH', body: { nickname: v } });
+          applyRemoteState(data);
+          toast('昵称已更新');
+          goBack('#/me');
+        } catch (e) {
+          button.disabled = false;
+          toast(e.message);
+        }
       };
       return;
     }
@@ -1399,15 +1481,27 @@ const EditFieldScreen = {
       paint();
     });
 
-    $('#saveField', root).onclick = () => {
+    $('#saveField', root).onclick = async () => {
       if (field === 'hobby' && val.length === 0) {
         toast('爱好至少保留 1 个');
         return;
       }
-      S.profile[field] = g.mode === 'multi' ? val : (val[0] || null);
-      save();
-      toast('已保存');
-      goBack('#/me');
+      const profile = JSON.parse(JSON.stringify(S.profile));
+      profile[field] = g.mode === 'multi' ? val : (val[0] || null);
+      const button = $('#saveField', root);
+      button.disabled = true;
+      try {
+        const data = await api('/api/profile', {
+          method: 'PATCH',
+          body: { profile, nickname: S.nickname }
+        });
+        applyRemoteState(data);
+        toast('已保存');
+        goBack('#/me');
+      } catch (e) {
+        button.disabled = false;
+        toast(e.message);
+      }
     };
 
     paint();
@@ -1441,6 +1535,7 @@ function parseHash() {
 
 let renderedHash = '__init__';
 let bootFailed = false;
+let remoteReady = typeof fetch !== 'function';
 
 /* 简易返回栈：记录走过的页面，返回时回上一页而不是写死 */
 const navStack = [];
@@ -1457,7 +1552,7 @@ function goBack(fallback) {
 }
 
 function render() {
-  if (bootFailed) return;
+  if (bootFailed || !remoteReady) return;
   try {
     const { name, id, params } = parseHash();
 
@@ -1546,6 +1641,32 @@ function bootGuard() {
   return false;
 }
 
-/* 启动 */
+async function bootRemote() {
+  appEl.innerHTML = `<div class="screen" style="justify-content:center;align-items:center;text-align:center">
+    <div class="logo" style="margin-bottom:14px">🧭</div>
+    <p style="font-size:13px;color:#646A73">正在连接行程服务…</p>
+  </div>`;
+  try {
+    const isDemo = new URLSearchParams(location.search).get('demo') === '1';
+    const data = await api(isDemo ? '/api/auth/demo' : '/api/bootstrap', isDemo ? { method: 'POST', body: {} } : {});
+    applyRemoteState(data);
+    remoteReady = true;
+    if (!location.hash) location.hash = S.auth ? '#/home' : '#/register';
+    if (bootGuard()) render();
+  } catch (e) {
+    remoteReady = false;
+    appEl.innerHTML = `<div class="screen" style="justify-content:center;align-items:center;padding:0 28px;text-align:center">
+      <div style="font-size:52px;margin-bottom:16px">📡</div>
+      <h1 style="font-size:20px;margin-bottom:10px">暂时连不上服务</h1>
+      <p style="font-size:13px;line-height:1.75;color:#646A73">${esc(e.message || '请检查网络')}</p>
+      <button class="btn-primary" id="retryBoot" style="margin-top:22px">重新连接</button>
+      <p style="font-size:11px;color:#C0C4CC;margin-top:18px">v${APP_VER}</p>
+    </div>`;
+    $('#retryBoot').onclick = bootRemote;
+  }
+}
+
+/* 启动：浏览器先向服务端取权威状态；无 fetch 的渲染测试保留本地数据自检 */
 if (!location.hash) location.hash = S.auth ? '#/home' : '#/register';
-if (bootGuard()) render();
+if (typeof fetch === 'function') bootRemote();
+else if (bootGuard()) render();

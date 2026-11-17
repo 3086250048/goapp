@@ -1,9 +1,9 @@
 /* ============================================================
-   原型 mock 数据：画像枚举 + 行程（每张首页卡片 = 一条行程）
+   前端离线兜底与种子源：画像枚举 + 行程（每张首页卡片 = 一条行程）
    价格单位：元。mode: pp = 每人价 / gp = 整团价
    ============================================================ */
 
-const TAXONOMY = {
+let TAXONOMY = {
   hobby: {
     title: '爱好', hint: '多选 1–5 个', mode: 'multi', max: 5, min: 1,
     options: [
@@ -37,7 +37,7 @@ const TAXONOMY = {
   }
 };
 
-const TRIPS = [
+let TRIPS = [
   {
     id: 't1', title: '周末古镇漫步 + 特色小吃', tags: ['play', 'food'],
     durationHours: 9, distance: 1200, city: '苏州',

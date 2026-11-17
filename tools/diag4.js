@@ -1,7 +1,11 @@
 ﻿const { spawn } = require('child_process');
 const path = require('path');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+const CHROME = process.env.CHROME_PATH || (process.platform === 'win32'
+  ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+  : process.platform === 'darwin'
+    ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+    : '/usr/bin/google-chrome');
 const PORT = 9338;
 const URL_ = process.argv[2];
 (async () => {
