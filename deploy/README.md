@@ -49,7 +49,7 @@ sudo ./deploy/deploy.sh --domain trip.example.com
 首次部署完成后检查：
 
 ```json
-{"ok":true,"database":"sqlite","version":"2.3.0"}
+{"ok":true,"database":"sqlite","version":"2.3.1"}
 ```
 
 ## 2. 环境变量
@@ -58,6 +58,7 @@ sudo ./deploy/deploy.sh --domain trip.example.com
 |---|---|---|
 | `--domain` / `DOMAIN` | 空 | 设置后启用 Caddy HTTPS |
 | `APP_PORT` | `18080` | Compose 暴露到本机的端口 |
+| `APP_BIND_ADDRESS` | `127.0.0.1` | 公网直连时设为 `0.0.0.0` |
 | `DATA_DIR` | `/data` | 容器内数据库目录 |
 | `DEMO_MODE` | `1` | 开启体验账号与固定体验验证码；生产接入短信后必须关闭 |
 | `DEMO_OTP` | `123456` | 体验验证码 |
@@ -79,6 +80,17 @@ sudo ./deploy/deploy.sh --domain trip.example.com
 
 脚本每次部署都会根据命令行参数重建项目根目录的 `.env`。`.env` 已加入 `.gitignore`，不能提交。
 完整变量模板见 [`deploy/env.example`](env.example)。
+
+公网 IPv4 + 非标准端口直连：
+
+```bash
+sudo ./deploy/deploy.sh \
+  --app-port 13506 \
+  --bind-address 0.0.0.0 \
+  --public-url http://115.227.50.204:13506
+```
+
+该模式是明文 HTTP，不能注册微信/QQ HTTPS 回调，浏览器定位也通常要求安全上下文。直连地址只适合临时演示；正式登录与 PWA 安装仍应使用 HTTPS 域名。
 
 显式指定管理员凭据：
 

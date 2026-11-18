@@ -12,6 +12,7 @@ APP_DIR="${APP_DIR:-/opt/goapp}"
 BRANCH="${BRANCH:-master}"
 DOMAIN="${DOMAIN:-}"
 APP_PORT="${APP_PORT:-18080}"
+APP_BIND_ADDRESS="${APP_BIND_ADDRESS:-127.0.0.1}"
 DEMO_MODE="${DEMO_MODE:-1}"
 DEMO_OTP="${DEMO_OTP:-123456}"
 ADMIN_USERNAME="${ADMIN_USERNAME:-}"
@@ -61,7 +62,9 @@ usage() {
   --ssh-port PORT      SSH 端口，默认 22
   --domain DOMAIN      域名；设置后启动 Caddy 并自动申请 HTTPS 证书
   --app-dir PATH       服务器安装目录，默认 /opt/goapp
-  --app-port PORT      仅绑定本机的应用端口，默认 18080
+  --app-port PORT      应用监听端口，默认 18080
+  --bind-address IP    监听地址；公网直连使用 0.0.0.0
+  --public-url URL     对外访问 Origin，例如 http://1.2.3.4:13506
   --branch NAME        部署分支，默认 master
   --repo-url URL       远端拉取的 Git 仓库地址
   --restore-file PATH  部署时导入 SQLite 备份（可选）
@@ -87,6 +90,8 @@ while (($#)); do
     --domain) DOMAIN="${2:-}"; shift 2 ;;
     --app-dir) APP_DIR="${2:-}"; shift 2 ;;
     --app-port) APP_PORT="${2:-}"; shift 2 ;;
+    --bind-address) APP_BIND_ADDRESS="${2:-}"; shift 2 ;;
+    --public-url) PUBLIC_BASE_URL="${2:-}"; PUBLIC_BASE_URL_EXPLICIT=1; shift 2 ;;
     --branch) BRANCH="${2:-}"; shift 2 ;;
     --repo-url) REPO_URL="${2:-}"; shift 2 ;;
     --restore-file) RESTORE_FILE="${2:-}"; shift 2 ;;
@@ -105,6 +110,8 @@ done
   || fail "SSH 端口无效：$SSH_PORT"
 [[ "$APP_PORT" =~ ^[0-9]+$ ]] && ((APP_PORT >= 1 && APP_PORT <= 65535)) \
   || fail "应用端口无效：$APP_PORT"
+[[ "$APP_BIND_ADDRESS" =~ ^[A-Za-z0-9.:-]+$ ]] \
+  || fail "监听地址无效：$APP_BIND_ADDRESS"
 [[ "$DEMO_MODE" == "0" || "$DEMO_MODE" == "1" ]] || fail "demo-mode 只能是 0 或 1"
 [[ "$DEMO_OTP" =~ ^[0-9]{6}$ ]] || fail "demo-otp 必须是 6 位数字"
 [[ "$ADMIN_USERNAME" =~ ^[A-Za-z0-9._-]{3,64}$ || -z "$ADMIN_USERNAME" ]] \
@@ -116,6 +123,10 @@ done
 if [[ -n "$DOMAIN" && ! "$DOMAIN" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]{2,}$ ]]; then
   fail "域名格式无效：$DOMAIN"
 fi
+if [[ -n "$PUBLIC_BASE_URL" && ! "$PUBLIC_BASE_URL" =~ ^https?://[^/]+$ ]]; then
+  fail "public-url 必须是无路径的 http(s) Origin：$PUBLIC_BASE_URL"
+fi
+PUBLIC_BASE_URL="${PUBLIC_BASE_URL%/}"
 if [[ -n "$RESTORE_FILE" && ! -f "$RESTORE_FILE" ]]; then
   fail "恢复文件不存在：$RESTORE_FILE"
 fi
@@ -128,6 +139,7 @@ if [[ -n "$REMOTE" ]]; then
     --bootstrap
     --app-dir "$APP_DIR"
     --app-port "$APP_PORT"
+    --bind-address "$APP_BIND_ADDRESS"
     --branch "$BRANCH"
     --repo-url "$REPO_URL"
     --demo-mode "$DEMO_MODE"
@@ -136,6 +148,7 @@ if [[ -n "$REMOTE" ]]; then
   ((ADMIN_USER_EXPLICIT)) && remote_args+=(--admin-user "$ADMIN_USERNAME")
   ((ADMIN_PASSWORD_EXPLICIT)) && remote_args+=(--admin-password "$ADMIN_PASSWORD")
   [[ -n "$DOMAIN" ]] && remote_args+=(--domain "$DOMAIN")
+  ((PUBLIC_BASE_URL_EXPLICIT)) && remote_args+=(--public-url "$PUBLIC_BASE_URL")
   ((SKIP_PULL)) && remote_args+=(--skip-pull)
   remote_restore=""
   if [[ -n "$RESTORE_FILE" ]]; then
@@ -232,6 +245,7 @@ if ((BOOTSTRAP)); then
   args=(
     --app-dir "$APP_DIR"
     --app-port "$APP_PORT"
+    --bind-address "$APP_BIND_ADDRESS"
     --branch "$BRANCH"
     --demo-mode "$DEMO_MODE"
     --demo-otp "$DEMO_OTP"
@@ -240,6 +254,7 @@ if ((BOOTSTRAP)); then
   ((ADMIN_USER_EXPLICIT)) && args+=(--admin-user "$ADMIN_USERNAME")
   ((ADMIN_PASSWORD_EXPLICIT)) && args+=(--admin-password "$ADMIN_PASSWORD")
   [[ -n "$DOMAIN" ]] && args+=(--domain "$DOMAIN")
+  ((PUBLIC_BASE_URL_EXPLICIT)) && args+=(--public-url "$PUBLIC_BASE_URL")
   [[ -n "$RESTORE_FILE" ]] && args+=(--restore-file "$RESTORE_FILE")
   log "切换到最新部署脚本"
   set +e
@@ -301,6 +316,7 @@ umask 077
 {
   printf 'COMPOSE_PROJECT_NAME=goapp\n'
   printf 'APP_PORT=%s\n' "$APP_PORT"
+  printf 'APP_BIND_ADDRESS=%s\n' "$APP_BIND_ADDRESS"
   printf 'DEMO_MODE=%s\n' "$DEMO_MODE"
   printf 'DEMO_OTP=%s\n' "$DEMO_OTP"
   printf 'ADMIN_USERNAME=%s\n' "$ADMIN_USERNAME"
@@ -321,6 +337,9 @@ umask 077
   printf 'CADDY_IMAGE=%s\n' "${CADDY_IMAGE:-caddy:2.10-alpine}"
   if [[ -n "$DOMAIN" ]]; then
     printf 'DOMAIN=%s\n' "$DOMAIN"
+    printf 'COOKIE_SECURE=1\n'
+  elif [[ "$PUBLIC_BASE_URL" == https://* ]]; then
+    printf 'DOMAIN=\n'
     printf 'COOKIE_SECURE=1\n'
   else
     printf 'DOMAIN=\n'
@@ -410,6 +429,21 @@ if [[ -n "$DOMAIN" ]]; then
     fail "HTTPS 未就绪；检查 DNS、80/443 防火墙与 Caddy 日志"
   fi
   ok "公网 HTTPS 已上线：$public_url"
+elif [[ -n "$PUBLIC_BASE_URL" ]]; then
+  log "检查公网直连地址"
+  direct_ok=0
+  for _ in $(seq 1 15); do
+    if curl -fsS --max-time 5 "$PUBLIC_BASE_URL/api/health" 2>/dev/null | grep -q '"ok":true'; then
+      direct_ok=1
+      break
+    fi
+    sleep 2
+  done
+  if [[ "$direct_ok" -eq 1 ]]; then
+    ok "公网直连已上线：$PUBLIC_BASE_URL"
+  else
+    warn "公网地址暂不可达：$PUBLIC_BASE_URL；请检查端口映射、NAT 和防火墙"
+  fi
 else
   ok "仅本机启动完成：http://127.0.0.1:$APP_PORT"
   warn "未传 --domain，不会配置公网 HTTPS"
@@ -419,6 +453,10 @@ printf '\n部署信息\n'
 printf '  代码目录  %s\n' "$REPO_ROOT"
 printf '  环境文件  %s\n' "$ENV_FILE"
 printf '  数据卷    goapp_goapp-data\n'
+printf '  监听地址  %s:%s\n' "$APP_BIND_ADDRESS" "$APP_PORT"
+if [[ -n "$PUBLIC_BASE_URL" ]]; then
+  printf '  公网地址  %s\n' "$PUBLIC_BASE_URL"
+fi
 printf '  管理后台  /admin/（账号 %s）\n' "$ADMIN_USERNAME"
 if ((ADMIN_PASSWORD_GENERATED)); then
   printf '  后台密码  已生成，保存在 %s 的 ADMIN_PASSWORD\n' "$ENV_FILE"

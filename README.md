@@ -129,6 +129,17 @@ admin/              管理后台静态页面
 sudo ./deploy/deploy.sh
 ```
 
+公网 IP 直连：
+
+```bash
+sudo ./deploy/deploy.sh \
+  --app-port 13506 \
+  --bind-address 0.0.0.0 \
+  --public-url http://115.227.50.204:13506
+```
+
+这是明文 HTTP，不支持微信/QQ 的正式 HTTPS 回调，也不能可靠使用浏览器定位和 PWA 安装。
+
 域名、HTTPS、反向代理、数据备份和生产环境变量见 [deploy/README.md](deploy/README.md)。
 
 ## 第三方服务接入

@@ -38,16 +38,20 @@ APP_VERSION=$(sed -n "s/^const APP_VER = '\([^']*\)';/\1/p" "$ROOT/prototype/app
 VERSION_CODE=$(awk -F. '{printf "%d%02d%02d", $1, $2, $3}' <<< "$APP_VERSION")
 
 configured_domain=""
+configured_public_url=""
 if [[ -f "$ROOT/.env" ]]; then
   configured_domain=$(sed -n 's/^DOMAIN=//p' "$ROOT/.env" | head -1)
+  configured_public_url=$(sed -n 's/^PUBLIC_BASE_URL=//p' "$ROOT/.env" | head -1)
 fi
 DEFAULT_APP_URL="https://locale-homework-indicating-sam.trycloudflare.com/"
-if [[ -n "$configured_domain" ]]; then
+if [[ -n "$configured_public_url" ]]; then
+  DEFAULT_APP_URL="${configured_public_url%/}/"
+elif [[ -n "$configured_domain" ]]; then
   DEFAULT_APP_URL="https://$configured_domain/"
 fi
 APP_URL="${APP_URL:-$DEFAULT_APP_URL}"
-[[ "$APP_URL" =~ ^https://[^[:space:]]+/$ ]] || {
-  printf 'APP_URL 必须是以 / 结尾的 HTTPS 地址：%s\n' "$APP_URL" >&2
+[[ "$APP_URL" =~ ^https?://[^[:space:]]+/$ ]] || {
+  printf 'APP_URL 必须是以 / 结尾的 HTTP(S) 地址：%s\n' "$APP_URL" >&2
   exit 1
 }
 APP_URL="$APP_URL?native=1"

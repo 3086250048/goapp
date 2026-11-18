@@ -21,6 +21,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
   cat > "$env_file" <<'EOF'
 COMPOSE_PROJECT_NAME=goapp
 APP_PORT=18080
+APP_BIND_ADDRESS=127.0.0.1
 DEMO_MODE=1
 DEMO_OTP=123456
 ADMIN_USERNAME=admin
@@ -48,6 +49,7 @@ EOF
   cat > "$env_file" <<'EOF'
 COMPOSE_PROJECT_NAME=goapp
 APP_PORT=18080
+APP_BIND_ADDRESS=127.0.0.1
 DEMO_MODE=1
 DEMO_OTP=123456
 ADMIN_USERNAME=admin

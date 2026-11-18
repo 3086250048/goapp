@@ -1,6 +1,6 @@
 /* 出行 App Service Worker —— 网络优先，断网时用缓存兜底
    注意：只在 HTTPS 下注册（见 index.html），本地开发不走缓存，避免改代码看不到效果。 */
-const VERSION = '2.3.0';
+const VERSION = '2.3.1';
 const CACHE = 'trip-' + VERSION;
 
 const ASSETS = [

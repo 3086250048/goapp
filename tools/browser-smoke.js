@@ -80,7 +80,7 @@ async function main() {
     error: !!document.querySelector('#__err'),
     nativeStatusHidden: getComputedStyle(document.querySelector('.statusbar')).display === 'none'
   })`);
-  if (home.version !== '2.3.0' || home.cards < 8 || home.fatal || home.error) {
+  if (home.version !== '2.3.1' || home.cards < 8 || home.fatal || home.error) {
     throw new Error(`首页未就绪: ${JSON.stringify(home)}`);
   }
   if (process.env.NATIVE_MODE === '1' && !home.nativeStatusHidden) {

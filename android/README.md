@@ -13,11 +13,13 @@ APP_URL=https://trip.example.com/ ./android/build-apk.sh
 产物：
 
 ```text
-dist/goapp-v2.3.0.apk
-dist/goapp-v2.3.0.apk.sha256
+dist/goapp-v2.3.1.apk
+dist/goapp-v2.3.1.apk.sha256
 ```
 
 首次构建会在 `.android-keys/` 生成独立签名密钥。该目录已被 Git 忽略；不要删除，否则后续 APK 无法覆盖安装旧版本，只能先卸载。
+
+当前公网直连版本使用 HTTP，因此 Manifest 允许明文流量；切换至正式 HTTPS 域名后应把 `usesCleartextTraffic` 改回 `false`。
 
 ## 要求
 

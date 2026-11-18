@@ -30,7 +30,7 @@ import segno
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "prototype"
 ADMIN_STATIC_DIR = BASE_DIR / "admin"
-APP_VERSION = "2.3.0"
+APP_VERSION = "2.3.1"
 SEED_FILE = Path(__file__).resolve().with_name("seed.json")
 DATA_DIR = Path(os.getenv("DATA_DIR", str(BASE_DIR / "data")))
 DB_FILE = DATA_DIR / "goapp.sqlite3"
